@@ -1,12 +1,12 @@
-const CACHE_NAME = "financas-offline-v1";
+// public/service-worker.js
 
+const CACHE_NAME = "financas-offline-v2";
+
+// Só arquivos que realmente existem em produção
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
   "/manifest.json",
-  "/src/main.jsx",
-  "/src/App.jsx",
-  "/src/styles/global.css",
   "/icons/icon-192.png",
   "/icons/icon-512.png"
 ];
@@ -35,9 +35,13 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: tenta cache → rede → cacheia resposta nova → fallback para index.html
+// Fetch: usa cache primeiro; se não tiver, busca na rede e salva no cache.
+// Se estiver offline e for navegação de página, cai pro index.html.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  // Ignora requisições que não são http/https (ex: chrome-extension)
+  if (!event.request.url.startsWith("http")) return;
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
@@ -54,7 +58,15 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match("/index.html");
+          // Se for navegação (abrir página) e deu erro, mostra o app
+          if (event.request.mode === "navigate") {
+            return caches.match("/index.html");
+          }
+          // Para outros arquivos, só falha silenciosamente
+          return new Response("Você está offline.", {
+            status: 503,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         });
     })
   );
