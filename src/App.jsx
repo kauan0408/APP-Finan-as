@@ -43,7 +43,11 @@ function loadFromStorage(key, defaultValue) {
 function saveToStorage(key, value) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    if (value === null || value === undefined) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }
   } catch (e) {
     console.error("Erro ao salvar storage:", key, e);
   }
@@ -63,7 +67,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // 👇 NOVO: trava pra não salvar no Firebase antes de carregar de lá
+  // 👇 trava pra não salvar no Firebase antes de carregar de lá
   const [dadosCarregados, setDadosCarregados] = useState(false);
 
   // Perfil (nome, renda mensal, limite de gasto, dia pagamento, etc.)
@@ -135,8 +139,8 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  /* ------- CARREGAR DADOS DA CONTA CERTA (LOCALSTORAGE – ANTIGO) ------- */
-  // (continua existindo como backup/migração)
+  /* ------- CARREGAR DADOS DA CONTA CERTA (LOCALSTORAGE – BACKUP) ------- */
+
   useEffect(() => {
     if (!user) return;
 
@@ -170,7 +174,7 @@ export default function App() {
     );
   }, [user]);
 
-  /* ------- CARREGAR/SINCRONIZAR COM FIRESTORE (USERS/{UID}) ------- */
+  /* ------- CARREGAR/SINCRONIZAR COM FIRESTORE (users/{uid}) ------- */
 
   useEffect(() => {
     if (!user) return;
@@ -235,10 +239,10 @@ export default function App() {
           );
         }
 
-        // ✅ AGORA SIM: marcamos que os dados do Firebase já foram carregados
+        // ✅ Dados do Firebase já carregados
         setDadosCarregados(true);
 
-        // 2) Ouvir em tempo real (sincroniza entre PCs)
+        // 2) Ouvir em tempo real (sincroniza entre dispositivos)
         unsub = onSnapshot(userDocRef, (docSnap) => {
           if (!docSnap.exists()) return;
           const data = docSnap.data();
@@ -258,7 +262,7 @@ export default function App() {
     };
   }, [user]);
 
-  /* ------- SALVAR DADOS POR CONTA (LOCALSTORAGE – ANTIGO) ------- */
+  /* ------- SALVAR DADOS POR CONTA (LOCALSTORAGE – BACKUP) ------- */
 
   useEffect(() => {
     if (!user) return;
@@ -280,15 +284,13 @@ export default function App() {
     saveToStorage(`reserva_${user.uid}`, reserva);
   }, [user, reserva]);
 
-  /* ------- SALVAR NO FIRESTORE SEMPRE QUE MUDAR ------- */
+  /* ------- SALVAR NO FIRESTORE (COM SUPORTE OFFLINE) ------- */
+  // Se estiver offline, guarda um "pacote pendente" no localStorage
 
   useEffect(() => {
-    // 🔴 ANTES: salvava sempre que mudava → podia apagar o banco vindo vazio
-    // ✅ AGORA: só salva se já tiver carregado do Firebase
     if (!user || !dadosCarregados) return;
 
     const uid = user.uid;
-    const userDocRef = doc(db, "users", uid);
 
     const payload = {
       profile,
@@ -297,10 +299,58 @@ export default function App() {
       reserva,
     };
 
-    setDoc(userDocRef, payload, { merge: true }).catch((err) => {
-      console.error("Erro ao salvar dados no Firestore:", err);
-    });
+    // Sem internet → não tenta falar com o Firebase
+    if (!navigator.onLine) {
+      console.log("Sem internet: salvando atualização pendente no storage.");
+      saveToStorage(`pendingSync_${uid}`, payload);
+      return;
+    }
+
+    const userDocRef = doc(db, "users", uid);
+
+    setDoc(userDocRef, payload, { merge: true })
+      .then(() => {
+        // Deu certo, limpa qualquer pendência antiga
+        saveToStorage(`pendingSync_${uid}`, null);
+      })
+      .catch((err) => {
+        console.error("Erro ao salvar dados no Firestore:", err);
+        // Se der erro (internet caiu), guarda como pendente
+        saveToStorage(`pendingSync_${uid}`, payload);
+      });
   }, [user, dadosCarregados, profile, transacoes, cartoes, reserva]);
+
+  /* ------- SINCRONIZAR PENDÊNCIAS QUANDO VOLTAR A INTERNET ------- */
+
+  useEffect(() => {
+    if (!user || !dadosCarregados) return;
+
+    const uid = user.uid;
+
+    const syncPendentes = async () => {
+      const pendente = loadFromStorage(`pendingSync_${uid}`, null);
+      if (!pendente) return;
+      if (!navigator.onLine) return;
+
+      try {
+        const userDocRef = doc(db, "users", uid);
+        await setDoc(userDocRef, pendente, { merge: true });
+        console.log("Pendências sincronizadas com sucesso.");
+        saveToStorage(`pendingSync_${uid}`, null);
+      } catch (err) {
+        console.error("Erro ao enviar pendências ao Firestore:", err);
+      }
+    };
+
+    // Tenta sincronizar na hora que o app abre
+    syncPendentes();
+
+    // E também sempre que a conexão voltar
+    window.addEventListener("online", syncPendentes);
+    return () => {
+      window.removeEventListener("online", syncPendentes);
+    };
+  }, [user, dadosCarregados]);
 
   /* ------- FUNÇÕES PARA O CONTEXTO ------- */
 
@@ -440,7 +490,13 @@ export default function App() {
               <button
                 className="primary-btn"
                 style={{ marginTop: 12 }}
-                onClick={loginComGoogle}
+                onClick={() => {
+                  if (!navigator.onLine) {
+                    alert("Sem internet. Conecte-se para fazer login com Google.");
+                    return;
+                  }
+                  loginComGoogle();
+                }}
               >
                 🔐 Entrar com Google
               </button>
