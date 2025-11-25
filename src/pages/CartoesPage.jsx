@@ -16,7 +16,7 @@ export default function CartoesPage() {
     transacoes,
     adicionarCartao,
     atualizarCartoes,
-    mesReferencia, // 👈 mesmo mês da página de Finanças
+    mesReferencia, // 👈 mesmo mês da tela Finanças
   } = useFinance();
 
   const [mostrarFormNovo, setMostrarFormNovo] = useState(false);
@@ -24,8 +24,8 @@ export default function CartoesPage() {
   const [limiteNovo, setLimiteNovo] = useState("");
   const [diaFechamentoNovo, setDiaFechamentoNovo] = useState("");
 
-  const [cartaoEditando, setCartaoEditando] = useState(null); // {id, nome, limite, diaFechamento}
-  const [cartaoParaExcluir, setCartaoParaExcluir] = useState(null); // id
+  const [cartaoEditando, setCartaoEditando] = useState(null);
+  const [cartaoParaExcluir, setCartaoParaExcluir] = useState(null);
 
   // 🔄 Transações SOMENTE do mês/ano selecionado
   const transacoesDoMes = useMemo(() => {
@@ -37,16 +37,16 @@ export default function CartoesPage() {
     });
   }, [transacoes, mesReferencia]);
 
-  // resumo de cada cartão (gasto no crédito nesse mês)
+  // resumo de cada cartão (gasto no crédito NESSE mês)
   const resumoCartoes = useMemo(() => {
     return cartoes.map((cartao) => {
-      // todas as compras no crédito desse cartão NO MÊS
       const compras = transacoesDoMes.filter(
         (t) =>
           t.tipo === "despesa" &&
           t.formaPagamento === "credito" &&
           t.cartaoId === cartao.id
       );
+
       const totalComprasMes = compras.reduce(
         (soma, t) => soma + Number(t.valor || 0),
         0
@@ -209,7 +209,7 @@ export default function CartoesPage() {
                         Fechamento: dia {cartao.diaFechamento || 1}
                       </p>
                       <p className="muted small">
-                        Limite disponível no mês:{" "}
+                        Limite disponível neste mês:{" "}
                         {formatCurrency(cartao.limiteDisponivelMes)}
                       </p>
                     </div>
