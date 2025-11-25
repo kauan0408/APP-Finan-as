@@ -16,7 +16,7 @@ export default function CartoesPage() {
     transacoes,
     adicionarCartao,
     atualizarCartoes,
-    adicionarTransacao,
+    mesReferencia, // 👈 mesmo mês da página de Finanças
   } = useFinance();
 
   const [mostrarFormNovo, setMostrarFormNovo] = useState(false);
@@ -27,53 +27,46 @@ export default function CartoesPage() {
   const [cartaoEditando, setCartaoEditando] = useState(null); // {id, nome, limite, diaFechamento}
   const [cartaoParaExcluir, setCartaoParaExcluir] = useState(null); // id
 
-  // 🧱 ESTADO PARA PAGAMENTO DE FATURA (feche data)
-  const [pagandoCartao, setPagandoCartao] = useState(null); // { id, nome, valorEmAberto }
-  const [valorPagamento, setValorPagamento] = useState("");
-  const [formaPagamento, setFormaPagamento] = useState("dinheiro");
+  // 🔄 Transações SOMENTE do mês/ano selecionado
+  const transacoesDoMes = useMemo(() => {
+    const { mes, ano } = mesReferencia;
+    return transacoes.filter((t) => {
+      if (!t.dataHora) return false;
+      const d = new Date(t.dataHora);
+      return d.getMonth() === mes && d.getFullYear() === ano;
+    });
+  }, [transacoes, mesReferencia]);
 
-  // resumo de cada cartão (quanto já foi gasto - quanto já foi pago)
+  // resumo de cada cartão (gasto no crédito nesse mês)
   const resumoCartoes = useMemo(() => {
     return cartoes.map((cartao) => {
-      // todas as compras no crédito desse cartão
-      const compras = transacoes.filter(
+      // todas as compras no crédito desse cartão NO MÊS
+      const compras = transacoesDoMes.filter(
         (t) =>
           t.tipo === "despesa" &&
           t.formaPagamento === "credito" &&
           t.cartaoId === cartao.id
       );
-      const totalCompras = compras.reduce(
+      const totalComprasMes = compras.reduce(
         (soma, t) => soma + Number(t.valor || 0),
         0
       );
-
-      // todos os pagamentos de fatura desse cartão
-      const pagamentos = transacoes.filter(
-        (t) => t.tipo === "pagamentoCartao" && t.cartaoId === cartao.id
-      );
-      const totalPagamentos = pagamentos.reduce(
-        (soma, t) => soma + Number(t.valor || 0),
-        0
-      );
-
-      // quanto ainda está "pendurado" no cartão
-      const totalGasto = Math.max(0, totalCompras - totalPagamentos);
 
       const perc =
         cartao.limite > 0
-          ? Math.min(100, (totalGasto / cartao.limite) * 100)
+          ? Math.min(100, (totalComprasMes / cartao.limite) * 100)
           : 0;
 
-      const limiteDisponivel = cartao.limite - totalGasto;
+      const limiteDisponivelMes = cartao.limite - totalComprasMes;
 
       return {
         ...cartao,
-        totalGasto,
-        percGasto: perc,
-        limiteDisponivel,
+        totalGastoMes: totalComprasMes,
+        percGastoMes: perc,
+        limiteDisponivelMes,
       };
     });
-  }, [cartoes, transacoes]);
+  }, [cartoes, transacoesDoMes]);
 
   function handleCadastrarCartao(e) {
     e.preventDefault();
@@ -135,55 +128,6 @@ export default function CartoesPage() {
 
   function cancelarExclusao() {
     setCartaoParaExcluir(null);
-  }
-
-  // 🧾 INICIAR PAGAMENTO DA FATURA (abre feche data)
-  function iniciarPagamento(cartao) {
-    const valorEmAberto = cartao.totalGasto > 0 ? cartao.totalGasto : 0;
-    setPagandoCartao({
-      id: cartao.id,
-      nome: cartao.nome,
-      valorEmAberto,
-    });
-    setValorPagamento(
-      valorEmAberto ? valorEmAberto.toFixed(2).replace(".", ",") : ""
-    );
-    setFormaPagamento("dinheiro");
-  }
-
-  // ✅ CONFIRMAR PAGAMENTO (cria transação tipo "pagamentoCartao")
-  function confirmarPagamentoFatura() {
-    if (!pagandoCartao) return;
-
-    const v = parseFloat(String(valorPagamento).replace(",", "."));
-    if (isNaN(v) || v <= 0) {
-      alert("Informe um valor válido para o pagamento.");
-      return;
-    }
-
-    if (v > pagandoCartao.valorEmAberto + 0.01) {
-      alert("O valor pago não pode ser maior que o valor em aberto.");
-      return;
-    }
-
-    adicionarTransacao({
-      tipo: "pagamentoCartao",
-      valor: v,
-      descricao: `Pagamento fatura - ${pagandoCartao.nome}`,
-      formaPagamento,
-      cartaoId: pagandoCartao.id,
-      dataHora: new Date().toISOString(),
-      parcelaAtual: null,
-      parcelaTotal: null,
-    });
-
-    setPagandoCartao(null);
-    setValorPagamento("");
-  }
-
-  function cancelarPagamentoFatura() {
-    setPagandoCartao(null);
-    setValorPagamento("");
   }
 
   return (
@@ -261,23 +205,18 @@ export default function CartoesPage() {
                     <div>
                       <h3>{cartao.nome}</h3>
                       <p className="muted small">
-                        Limite: {formatCurrency(cartao.limite)} · Fechamento:
-                        dia {cartao.diaFechamento || 1}
+                        Limite total: {formatCurrency(cartao.limite)} ·
+                        Fechamento: dia {cartao.diaFechamento || 1}
                       </p>
                       <p className="muted small">
-                        {cartao.limiteDisponivel >= 0
-                          ? `Limite disponível: ${formatCurrency(
-                              cartao.limiteDisponivel
-                            )}`
-                          : `Limite disponível: ${formatCurrency(
-                              cartao.limiteDisponivel
-                            )} (limite estourado)`}
+                        Limite disponível no mês:{" "}
+                        {formatCurrency(cartao.limiteDisponivelMes)}
                       </p>
                     </div>
                     <div className="align-right">
-                      <p className="history-summary-label">Gasto atual</p>
+                      <p className="history-summary-label">Gasto no mês</p>
                       <p className="history-summary-value negative">
-                        {formatCurrency(cartao.totalGasto)}
+                        {formatCurrency(cartao.totalGastoMes)}
                       </p>
                     </div>
                   </div>
@@ -286,11 +225,12 @@ export default function CartoesPage() {
                     <div className="progress-bar">
                       <div
                         className="progress-fill"
-                        style={{ width: `${cartao.percGasto.toFixed(0)}%` }}
+                        style={{ width: `${cartao.percGastoMes.toFixed(0)}%` }}
                       />
                     </div>
                     <span className="progress-label">
-                      {cartao.percGasto.toFixed(0)}% do limite usado.
+                      {cartao.percGastoMes.toFixed(0)}% do limite usado neste
+                      mês.
                     </span>
                   </div>
 
@@ -303,13 +243,6 @@ export default function CartoesPage() {
                       flexWrap: "wrap",
                     }}
                   >
-                    <button
-                      type="button"
-                      className="toggle-btn"
-                      onClick={() => iniciarPagamento(cartao)}
-                    >
-                      💸 Pagar fatura
-                    </button>
                     <button
                       type="button"
                       className="toggle-btn"
@@ -433,74 +366,6 @@ export default function CartoesPage() {
                 onClick={confirmarExclusao}
               >
                 Sim, excluir
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 🧱 MODAL DE PAGAMENTO DE FATURA (feche data) */}
-      {pagandoCartao && (
-        <div className="modal-overlay">
-          <div className="modal-card">
-            <h3>Pagar fatura do cartão</h3>
-            <p className="muted small">
-              Cartão: <strong>{pagandoCartao.nome}</strong>
-              <br />
-              Valor em aberto:{" "}
-              <strong>{formatCurrency(pagandoCartao.valorEmAberto)}</strong>
-            </p>
-
-            <div className="field" style={{ marginTop: 10 }}>
-              <label>Valor do pagamento (R$)</label>
-              <input
-                type="text"
-                value={valorPagamento}
-                onChange={(e) => setValorPagamento(e.target.value)}
-                placeholder="Ex.: 250,00"
-              />
-            </div>
-
-            <div className="field">
-              <label>Forma de pagamento</label>
-              <select
-                value={formaPagamento}
-                onChange={(e) => setFormaPagamento(e.target.value)}
-              >
-                <option value="dinheiro">Dinheiro</option>
-                <option value="debito">Débito</option>
-                <option value="pix">PIX</option>
-                <option value="outros">Outros</option>
-              </select>
-            </div>
-
-            <p className="muted small" style={{ marginTop: 6 }}>
-              Esse pagamento não cria nova compra no crédito. Ele apenas reduz o{" "}
-              <strong>gasto atual</strong> desse cartão.
-            </p>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                marginTop: 10,
-              }}
-            >
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={confirmarPagamentoFatura}
-              >
-                ✅ Confirmar pagamento
-              </button>
-              <button
-                type="button"
-                className="primary-btn"
-                style={{ background: "#374151", color: "#e5e7eb" }}
-                onClick={cancelarPagamentoFatura}
-              >
-                ✖ Cancelar
               </button>
             </div>
           </div>
