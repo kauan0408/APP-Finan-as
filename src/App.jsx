@@ -28,6 +28,23 @@ export function useFinance() {
   return useContext(FinanceContext);
 }
 
+// Valores padrão centralizados
+const DEFAULT_PROFILE = {
+  nome: "",
+  rendaMensal: "",
+  limiteGastoMensal: "",
+  metaReservaMensal: "",
+  reservaAcumulada: "",
+  diaPagamento: "",
+  avatarBase64: "",
+};
+
+const DEFAULT_RESERVA = {
+  metaMensal: 0,
+  locais: [],
+  movimentos: [],
+};
+
 function loadFromStorage(key, defaultValue) {
   if (typeof window === "undefined") return defaultValue;
   try {
@@ -60,6 +77,20 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+// Mescla arrays de objetos pelo campo id (remote + offline, sem perder nada)
+function mergeById(remote = [], offline = []) {
+  const map = new Map();
+  remote.forEach((item) => {
+    if (item && item.id) map.set(item.id, item);
+    else map.set(Symbol(), item);
+  });
+  offline.forEach((item) => {
+    if (item && item.id) map.set(item.id, item); // offline sobrescreve mesmo id
+    else map.set(Symbol(), item);
+  });
+  return Array.from(map.values());
+}
+
 /* ---------------- COMPONENTE PRINCIPAL ---------------- */
 
 export default function App() {
@@ -71,15 +102,7 @@ export default function App() {
   const [dadosCarregados, setDadosCarregados] = useState(false);
 
   // Perfil (nome, renda mensal, limite de gasto, dia pagamento, etc.)
-  const [profile, setProfile] = useState({
-    nome: "",
-    rendaMensal: "",
-    limiteGastoMensal: "",
-    metaReservaMensal: "",
-    reservaAcumulada: "",
-    diaPagamento: "",
-    avatarBase64: "",
-  });
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
 
   // Transações (despesas/receitas)
   const [transacoes, setTransacoes] = useState([]);
@@ -88,11 +111,7 @@ export default function App() {
   const [cartoes, setCartoes] = useState([]);
 
   // Reserva de emergência
-  const [reserva, setReserva] = useState({
-    metaMensal: 0,
-    locais: [], // { id, nome, valor }
-    movimentos: [], // histórico de adições
-  });
+  const [reserva, setReserva] = useState(DEFAULT_RESERVA);
 
   // 🔄 MÊS DE REFERÊNCIA GLOBAL (para a visão mensal)
   const hoje = new Date();
@@ -146,111 +165,113 @@ export default function App() {
 
     const uid = user.uid;
 
-    const storedProfile = loadFromStorage(`profile_${uid}`, null);
-    const storedTransacoes = loadFromStorage(`transacoes_${uid}`, null);
-    const storedCartoes = loadFromStorage(`cartoes_${uid}`, null);
-    const storedReserva = loadFromStorage(`reserva_${uid}`, null);
+    const storedProfile = loadFromStorage(`profile_${uid}`, DEFAULT_PROFILE);
+    const storedTransacoes = loadFromStorage(`transacoes_${uid}`, []);
+    const storedCartoes = loadFromStorage(`cartoes_${uid}`, []);
+    const storedReserva = loadFromStorage(`reserva_${uid}`, DEFAULT_RESERVA);
 
-    setProfile(
-      storedProfile || {
-        nome: "",
-        rendaMensal: "",
-        limiteGastoMensal: "",
-        metaReservaMensal: "",
-        reservaAcumulada: "",
-        diaPagamento: "",
-        avatarBase64: "",
-      }
-    );
-
-    setTransacoes(storedTransacoes || []);
-    setCartoes(storedCartoes || []);
-    setReserva(
-      storedReserva || {
-        metaMensal: 0,
-        locais: [],
-        movimentos: [],
-      }
-    );
+    setProfile(storedProfile);
+    setTransacoes(storedTransacoes);
+    setCartoes(storedCartoes);
+    setReserva(storedReserva);
   }, [user]);
 
   /* ------- CARREGAR/SINCRONIZAR COM FIRESTORE (users/{uid}) ------- */
+  // MODO SEGURO: mescla o que está no Firestore com o que ficou pendente offline
 
   useEffect(() => {
     if (!user) return;
 
     const uid = user.uid;
     const userDocRef = doc(db, "users", uid);
-
     let unsub;
 
     (async () => {
       try {
-        // 1) Verifica se já existe doc desse usuário
+        // 1) Busca dados pendentes (offline) se existir
+        const pendente = loadFromStorage(`pendingSync_${uid}`, null);
+
+        // 2) Busca dados remotos atuais
         const snap = await getDoc(userDocRef);
 
-        if (!snap.exists()) {
-          // Se não existir, cria com os valores padrão
-          const inicial = {
-            profile: {
-              nome: "",
-              rendaMensal: "",
-              limiteGastoMensal: "",
-              metaReservaMensal: "",
-              reservaAcumulada: "",
-              diaPagamento: "",
-              avatarBase64: "",
-            },
-            transacoes: [],
-            cartoes: [],
-            reserva: {
-              metaMensal: 0,
-              locais: [],
-              movimentos: [],
-            },
-          };
+        let remoto = {
+          profile: DEFAULT_PROFILE,
+          transacoes: [],
+          cartoes: [],
+          reserva: DEFAULT_RESERVA,
+        };
 
-          await setDoc(userDocRef, inicial);
-          setProfile(inicial.profile);
-          setTransacoes(inicial.transacoes);
-          setCartoes(inicial.cartoes);
-          setReserva(inicial.reserva);
-        } else {
+        if (snap.exists()) {
           const data = snap.data();
-          setProfile(
-            data.profile || {
-              nome: "",
-              rendaMensal: "",
-              limiteGastoMensal: "",
-              metaReservaMensal: "",
-              reservaAcumulada: "",
-              diaPagamento: "",
-              avatarBase64: "",
-            }
-          );
-          setTransacoes(data.transacoes || []);
-          setCartoes(data.cartoes || []);
-          setReserva(
-            data.reserva || {
-              metaMensal: 0,
-              locais: [],
-              movimentos: [],
-            }
-          );
+          remoto = {
+            profile: data.profile || DEFAULT_PROFILE,
+            transacoes: data.transacoes || [],
+            cartoes: data.cartoes || [],
+            reserva: data.reserva || DEFAULT_RESERVA,
+          };
+        } else {
+          // Se nunca existiu doc, cria padrão
+          await setDoc(userDocRef, remoto);
         }
 
-        // ✅ Dados do Firebase já carregados
+        // 3) Mesclar com o que estava pendente offline (se tiver)
+        let finalProfile = remoto.profile;
+        let finalTransacoes = remoto.transacoes;
+        let finalCartoes = remoto.cartoes;
+        let finalReserva = remoto.reserva;
+
+        if (pendente) {
+          // profile e reserva: offline sobrescreve se existir
+          if (pendente.profile) {
+            finalProfile = { ...finalProfile, ...pendente.profile };
+          }
+          if (pendente.reserva) {
+            finalReserva = { ...finalReserva, ...pendente.reserva };
+          }
+
+          // transações e cartões: unir remoto + offline (sem perder nada)
+          if (pendente.transacoes) {
+            finalTransacoes = mergeById(remoto.transacoes, pendente.transacoes);
+          }
+          if (pendente.cartoes) {
+            finalCartoes = mergeById(remoto.cartoes, pendente.cartoes);
+          }
+        }
+
+        // 4) Atualiza o estado do app com o resultado mesclado
+        setProfile(finalProfile);
+        setTransacoes(finalTransacoes);
+        setCartoes(finalCartoes);
+        setReserva(finalReserva);
+
+        // 5) Se tiver pendente e tiver internet, manda versão mesclada pro Firestore
+        if (pendente && navigator.onLine) {
+          await setDoc(
+            userDocRef,
+            {
+              profile: finalProfile,
+              transacoes: finalTransacoes,
+              cartoes: finalCartoes,
+              reserva: finalReserva,
+            },
+            { merge: false } // grava doc inteiro já mesclado
+          );
+          saveToStorage(`pendingSync_${uid}`, null);
+          console.log("Pendências offline mescladas e sincronizadas no Firestore.");
+        }
+
+        // 6) Marca que os dados do Firestore já foram carregados
         setDadosCarregados(true);
 
-        // 2) Ouvir em tempo real (sincroniza entre dispositivos)
+        // 7) Ouvir em tempo real (sincroniza entre dispositivos)
         unsub = onSnapshot(userDocRef, (docSnap) => {
           if (!docSnap.exists()) return;
           const data = docSnap.data();
 
-          if (data.profile) setProfile(data.profile);
-          if (data.transacoes) setTransacoes(data.transacoes);
-          if (data.cartoes) setCartoes(data.cartoes);
-          if (data.reserva) setReserva(data.reserva);
+          setProfile(data.profile || DEFAULT_PROFILE);
+          setTransacoes(data.transacoes || []);
+          setCartoes(data.cartoes || []);
+          setReserva(data.reserva || DEFAULT_RESERVA);
         });
       } catch (err) {
         console.error("Erro ao carregar dados do Firestore:", err);
@@ -334,8 +355,9 @@ export default function App() {
 
       try {
         const userDocRef = doc(db, "users", uid);
+        // Aqui usamos merge:true porque o pendente já foi mesclado antes, se necessário
         await setDoc(userDocRef, pendente, { merge: true });
-        console.log("Pendências sincronizadas com sucesso.");
+        console.log("Pendências sincronizadas com sucesso (on online event).");
         saveToStorage(`pendingSync_${uid}`, null);
       } catch (err) {
         console.error("Erro ao enviar pendências ao Firestore:", err);
@@ -492,7 +514,9 @@ export default function App() {
                 style={{ marginTop: 12 }}
                 onClick={() => {
                   if (!navigator.onLine) {
-                    alert("Sem internet. Conecte-se para fazer login com Google.");
+                    alert(
+                      "Sem internet. Conecte-se para fazer login com Google."
+                    );
                     return;
                   }
                   loginComGoogle();
