@@ -80,7 +80,9 @@ export default function App() {
     reservaAcumulada: "",
     diaPagamento: "",
     avatarBase64: "",
+    salariosPorMes: {}, // 👈 novo
   });
+  
 
   // Transações (despesas/receitas)
   const [transacoes, setTransacoes] = useState([]);
@@ -161,8 +163,9 @@ export default function App() {
         reservaAcumulada: "",
         diaPagamento: "",
         avatarBase64: "",
+        salariosPorMes: {}, // 👈 novo
       }
-    );
+    );    
 
     setTransacoes(storedTransacoes || []);
     setCartoes(storedCartoes || []);
