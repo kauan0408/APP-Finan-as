@@ -1,10 +1,14 @@
+// src/pages/PerfilPage.jsx
 import React from "react";
 import { useFinance } from "../App.jsx";
 import { auth, logout } from "../firebase";
 
 export default function PerfilPage() {
-  const { profile, atualizarProfile } = useFinance();
+  const { profile, atualizarProfile, adicionarTransacao } = useFinance();
   const user = auth.currentUser; // conta Google atual (se estiver logada)
+
+  // salário digitado para registrar como receita do mês
+  const [salarioInput, setSalarioInput] = React.useState("");
 
   const handleChange = (campo) => (e) => {
     atualizarProfile({ [campo]: e.target.value });
@@ -18,6 +22,31 @@ export default function PerfilPage() {
       console.error(err);
       alert("Erro ao sair da conta Google.");
     }
+  };
+
+  const registrarSalarioMes = () => {
+    if (!salarioInput) {
+      alert("Digite um valor para o salário.");
+      return;
+    }
+
+    const valor = Number(salarioInput.replace(",", "."));
+    if (!valor || valor <= 0) {
+      alert("Digite um valor válido para o salário.");
+      return;
+    }
+
+    adicionarTransacao({
+      tipo: "receita",
+      descricao: "Salário do mês",
+      valor,
+      dataHora: new Date().toISOString(),
+      categoria: "salario-fixo",
+      formaPagamento: "outros",
+    });
+
+    setSalarioInput("");
+    alert("Salário deste mês registrado com sucesso!");
   };
 
   return (
@@ -114,19 +143,11 @@ export default function PerfilPage() {
         </div>
       </div>
 
+      {/* CONFIGURAÇÕES FINANCEIRAS */}
       <div className="card mt">
         <h3>Configurações financeiras</h3>
 
-        <div className="field">
-          <label>Renda mensal fixa (R$)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={profile.rendaMensal || ""}
-            onChange={handleChange("rendaMensal")}
-          />
-        </div>
-
+        {/* Limite de gasto mensal (continua igual) */}
         <div className="field">
           <label>Limite de gasto mensal (R$)</label>
           <input
@@ -137,6 +158,7 @@ export default function PerfilPage() {
           />
         </div>
 
+        {/* Dia que recebe (continua igual) */}
         <div className="field">
           <label>Dia que você recebe (1 a 31)</label>
           <input
@@ -146,6 +168,32 @@ export default function PerfilPage() {
             value={profile.diaPagamento || ""}
             onChange={handleChange("diaPagamento")}
           />
+        </div>
+
+        {/* NOVO: registrar salário do mês como transação */}
+        <div className="field" style={{ marginTop: 12 }}>
+          <label>Salário deste mês (R$)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={salarioInput}
+            onChange={(e) => setSalarioInput(e.target.value)}
+            placeholder="Ex.: 1200"
+          />
+
+          <button
+            type="button"
+            className="primary-btn"
+            style={{ marginTop: 8 }}
+            onClick={registrarSalarioMes}
+          >
+            Registrar salário deste mês
+          </button>
+
+          <p className="muted small" style={{ marginTop: 6 }}>
+            Cada salário registrado conta como receita só desse mês. Alterar
+            depois não muda os meses anteriores.
+          </p>
         </div>
       </div>
     </div>
