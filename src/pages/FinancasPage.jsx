@@ -119,10 +119,18 @@ export default function FinancasPage() {
     };
   }, [transacoes, mesReferencia]); // 👈 AQUI ESTAVA O ERRO (antes estava mesRef)
 
-  /* VARIÁVEIS DO PERFIL */
-  const salarioFixo = Number(profile.rendaMensal || 0);
-  const limiteGastoMensal = Number(profile.limiteGastoMensal || 0);
-  const diaPagamento = profile.diaPagamento || "";
+    /* VARIÁVEIS DO PERFIL */
+    // chave do mês atual: "2025-11", "2025-12", etc.
+    const chaveMes = `${mesReferencia.ano}-${String(mesReferencia.mes + 1).padStart(2, "0")}`;
+    const salariosPorMes = profile.salariosPorMes || {};
+
+    const salarioFixo = Number(
+      salariosPorMes[chaveMes] ?? profile.rendaMensal ?? 0
+    );
+
+    const limiteGastoMensal = Number(profile.limiteGastoMensal || 0);
+    const diaPagamento = profile.diaPagamento || "";
+
 
   const proximoPag = diaPagamento
     ? calcularProximoPagamento(
