@@ -183,10 +183,11 @@ export default function HistoricoPage() {
     setEditando(t);
     setDescricaoEdit(t.descricao || "");
 
-    const valorTotal = t.groupId && t.parcelaTotal && t.parcelaTotal > 1
-      ? t.totalCompra ||
-        Number(t.valor || 0) * Number(t.parcelaTotal || 1)
-      : t.valor || "";
+    const valorTotal =
+      t.groupId && t.parcelaTotal && t.parcelaTotal > 1
+        ? t.totalCompra ||
+          Number(t.valor || 0) * Number(t.parcelaTotal || 1)
+        : t.valor || "";
 
     setValorEdit(String(valorTotal));
     setTipoEdit(t.tipo || "despesa");
