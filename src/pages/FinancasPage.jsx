@@ -219,52 +219,13 @@ export default function FinancasPage() {
         </div>
       </div>
 
-      {/* BLOCO PRINCIPAL JUNTO (SALÁRIO + DIA + RESULTADO) */}
-      <div className="card resumo-card">
-        <div className="resumo-top">
-          <div>
-            <p className="resumo-label">Salário fixo</p>
-            <p className="resumo-value">
-              {salarioFixo
-                ? formatCurrency(salarioFixo)
-                : "Defina na aba Perfil"}
-            </p>
-          </div>
-
-          <div className="pill">
-            {diaPagamento ? (
-              <>
-                <span>Dia {diaPagamento}</span>
-                {proximoPag && (
-                  <span className="pill-sub">
-                    Próx. em {proximoPag.diasRestantes} dia(s)
-                  </span>
-                )}
-              </>
-            ) : (
-              <span>Sem dia definido</span>
-            )}
-          </div>
-        </div>
-
-        {/* Resultado salário */}
-        <div className="resumo-footer">
-          {resultadoSalario === null ? (
-            <p className="muted small">
-              Defina sua renda mensal fixa na aba Perfil para calcular sobras.
-            </p>
-          ) : (
-            <span
-              className={
-                "badge badge-pill " +
-                (resultadoSalario >= 0 ? "badge-positive" : "badge-negative")
-              }
-            >
-              {resultadoSalario >= 0 ? "Sobrou" : "Faltou"}{" "}
-              {formatCurrency(Math.abs(resultadoSalario))}
-            </span>
-          )}
-        </div>
+      {/* BLOCO PRINCIPAL JUNTO ( DIA ) */}
+      <div className="pill">
+        {diaPagamento ? (
+          <span>Dia {diaPagamento}</span>
+        ) : (
+          <span>Sem dia definido</span>
+        )}
       </div>
 
       {/* RECEITAS / DESPESAS / SALDO / CRÉDITO */}
@@ -406,3 +367,4 @@ export default function FinancasPage() {
     </div>
   );
 }
+
