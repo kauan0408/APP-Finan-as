@@ -199,36 +199,82 @@ export default function HistoricoPage() {
     setCartaoEdit("");
   };
 
-  const salvarEdicao = () => {
-    if (!editando) return;
+const salvarEdicao = () => {
+  if (!editando) return;
 
-    const v = parseFloat(String(valorEdit).replace(",", "."));
-    if (isNaN(v) || v <= 0) {
-      alert("Informe um valor válido.");
-      return;
-    }
+  const t = editando;
 
-    const dadosAtualizados = {
-      tipo: tipoEdit,
-      valor: v,
-      descricao: descricaoEdit,
-      categoria: tipoEdit === "despesa" ? categoriaEdit : null,
-      formaPagamento: formaEdit,
-      cartaoId: formaEdit === "credito" ? cartaoEdit || null : null,
-    };
+  const v = parseFloat(String(valorEdit).replace(",", "."));
+  if (isNaN(v) || v <= 0) {
+    alert("Informe um valor válido.");
+    return;
+  }
 
-    atualizarTransacao(editando.id, dadosAtualizados);
+  // 🔥 SE FOR PARCELADA → EDITA TODAS AS PARCELAS DO MESMO groupId
+  if (t.groupId) {
+    const parcelas = transacoes
+      .filter((p) => p.groupId === t.groupId)
+      .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
+
+    const totalParcelas = parcelas.length || 1;
+    const valorParcela = v / totalParcelas;
+
+    parcelas.forEach((p) => {
+      atualizarTransacao(p.id, {
+        ...p,
+        descricao: descricaoEdit,
+        tipo: tipoEdit,
+        categoria: tipoEdit === "despesa" ? categoriaEdit : null,
+        formaPagamento: formaEdit,
+        cartaoId: formaEdit === "credito" ? cartaoEdit || "" : null,
+        valor: valorParcela,
+      });
+    });
+
     fecharEdicao();
-  };
+    return;
+  }
+
+  // TRANSAÇÃO NORMAL
+  atualizarTransacao(t.id, {
+    descricao: descricaoEdit,
+    valor: v,
+    tipo: tipoEdit,
+    categoria: tipoEdit === "despesa" ? categoriaEdit : null,
+    formaPagamento: formaEdit,
+    cartaoId: formaEdit === "credito" ? cartaoEdit : "",
+  });
+
+  fecharEdicao();
+};
+;
 
   // 🗑️ confirmar exclusão
   const confirmarApagar = () => {
     if (!confirmandoExclusao) return;
 
-    removerTransacao(confirmandoExclusao.id);
+    const t = confirmandoExclusao;
 
-    if (editando && editando.id === confirmandoExclusao.id) {
-      fecharEdicao();
+    // 🔥 Se for compra parcelada (tem groupId) → apaga TODAS as parcelas
+    if (t.groupId) {
+      const todasParcelas = transacoes.filter(
+        (p) => p.groupId === t.groupId
+      );
+
+      todasParcelas.forEach((p) => removerTransacao(p.id));
+    } else {
+      // Transação normal
+      removerTransacao(t.id);
+    }
+
+    // Se estiver editando alguma transação desse mesmo grupo, fecha edição
+    if (editando) {
+      if (
+        (editando.groupId && t.groupId && editando.groupId === t.groupId) ||
+        editando.id === t.id
+      ) {
+        fecharEdicao();
+      }
     }
 
     setConfirmandoExclusao(null);
@@ -619,12 +665,20 @@ export default function HistoricoPage() {
       {confirmandoExclusao && (
         <div className="modal-overlay">
           <div className="modal-card">
-            <h3>Apagar transação?</h3>
-            <p className="muted small">
-              {confirmandoExclusao.descricao || "Sem descrição"}
-              <br />
-              {formatCurrency(confirmandoExclusao.valor)}
-            </p>
+          <h3>Apagar transação?</h3>
+              <p className="muted small">
+                {confirmandoExclusao.descricao || "Sem descrição"}
+                <br />
+                {formatCurrency(confirmandoExclusao.valor)}
+                {confirmandoExclusao.groupId && (
+                  <>
+                    <br />
+                    <strong style={{ color: "#f97373" }}>
+                      Esta compra é parcelada. Todas as parcelas serão apagadas.
+                    </strong>
+                  </>
+                )}
+              </p>
 
             <div
               style={{
