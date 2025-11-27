@@ -48,7 +48,7 @@ export default function HistoricoPage() {
   const [formaEdit, setFormaEdit] = useState("dinheiro");
   const [cartaoEdit, setCartaoEdit] = useState("");
 
-  // 🗑️ modal de exclusão
+  // 🗑️ modal de exclusão (guarda a transação selecionada)
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null);
 
   const cartaoNomePorId = useMemo(() => {
@@ -199,80 +199,77 @@ export default function HistoricoPage() {
     setCartaoEdit("");
   };
 
-const salvarEdicao = () => {
-  if (!editando) return;
+  const salvarEdicao = () => {
+    if (!editando) return;
 
-  const t = editando;
+    const t = editando;
 
-  const v = parseFloat(String(valorEdit).replace(",", "."));
-  if (isNaN(v) || v <= 0) {
-    alert("Informe um valor válido.");
-    return;
-  }
+    const v = parseFloat(String(valorEdit).replace(",", "."));
+    if (isNaN(v) || v <= 0) {
+      alert("Informe um valor válido.");
+      return;
+    }
 
-  // 🔥 SE FOR PARCELADA → EDITA TODAS AS PARCELAS DO MESMO groupId
-  if (t.groupId) {
-    const parcelas = transacoes
-      .filter((p) => p.groupId === t.groupId)
-      .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
+    // 🔥 SE FOR COMPRA PARCELADA (tem groupId) → EDITA TODAS AS PARCELAS
+    if (t.groupId) {
+      const parcelas = transacoes
+        .filter((p) => p.groupId === t.groupId)
+        .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
 
-    const totalParcelas = parcelas.length || 1;
-    const valorParcela = v / totalParcelas;
+      const totalParcelas = parcelas.length || 1;
+      const valorParcela = v / totalParcelas;
 
-    parcelas.forEach((p) => {
-      atualizarTransacao(p.id, {
-        ...p,
-        descricao: descricaoEdit,
-        tipo: tipoEdit,
-        categoria: tipoEdit === "despesa" ? categoriaEdit : null,
-        formaPagamento: formaEdit,
-        cartaoId: formaEdit === "credito" ? cartaoEdit || "" : null,
-        valor: valorParcela,
+      parcelas.forEach((p) => {
+        atualizarTransacao(p.id, {
+          ...p,
+          descricao: descricaoEdit,
+          tipo: tipoEdit,
+          categoria: tipoEdit === "despesa" ? categoriaEdit : null,
+          formaPagamento: formaEdit,
+          cartaoId: formaEdit === "credito" ? cartaoEdit || "" : null,
+          valor: valorParcela,
+        });
       });
-    });
 
+      fecharEdicao();
+      return;
+    }
+
+    // 🌈 SE NÃO FOR PARCELADA → EDITA SÓ ESSA
+    const dadosAtualizados = {
+      tipo: tipoEdit,
+      valor: v,
+      descricao: descricaoEdit,
+      categoria: tipoEdit === "despesa" ? categoriaEdit : null,
+      formaPagamento: formaEdit,
+      cartaoId: formaEdit === "credito" ? cartaoEdit || null : null,
+    };
+
+    atualizarTransacao(editando.id, dadosAtualizados);
     fecharEdicao();
-    return;
-  }
+  };
 
-  // TRANSAÇÃO NORMAL
-  atualizarTransacao(t.id, {
-    descricao: descricaoEdit,
-    valor: v,
-    tipo: tipoEdit,
-    categoria: tipoEdit === "despesa" ? categoriaEdit : null,
-    formaPagamento: formaEdit,
-    cartaoId: formaEdit === "credito" ? cartaoEdit : "",
-  });
-
-  fecharEdicao();
-};
-;
-
-  // 🗑️ confirmar exclusão
+  // 🗑️ confirmar exclusão (apaga tudo se for parcelada)
   const confirmarApagar = () => {
     if (!confirmandoExclusao) return;
 
     const t = confirmandoExclusao;
 
-    // 🔥 Se for compra parcelada (tem groupId) → apaga TODAS as parcelas
     if (t.groupId) {
-      const todasParcelas = transacoes.filter(
-        (p) => p.groupId === t.groupId
-      );
+      // 🔥 Compra parcelada: remove TODAS as parcelas com o mesmo groupId
+      const parcelas = transacoes.filter((p) => p.groupId === t.groupId);
+      parcelas.forEach((p) => {
+        removerTransacao(p.id);
+      });
 
-      todasParcelas.forEach((p) => removerTransacao(p.id));
+      if (editando && editando.groupId === t.groupId) {
+        fecharEdicao();
+      }
     } else {
-      // Transação normal
+      // Transação normal (não parcelada)
       removerTransacao(t.id);
-    }
 
-    // Se estiver editando alguma transação desse mesmo grupo, fecha edição
-    if (editando) {
-      if (
-        (editando.groupId && t.groupId && editando.groupId === t.groupId) ||
-        editando.id === t.id
-      ) {
+      if (editando && editando.id === t.id) {
         fecharEdicao();
       }
     }
@@ -558,6 +555,14 @@ const salvarEdicao = () => {
               {formatDate(editando.dataHora)} • {formatTime(editando.dataHora)}
             </p>
 
+            {editando.groupId && (
+              <p className="muted small" style={{ marginBottom: 6 }}>
+                Esta transação faz parte de uma{" "}
+                <strong>compra parcelada</strong>. As alterações vão valer
+                para todas as parcelas desse grupo.
+              </p>
+            )}
+
             <div className="field">
               <label>Descrição</label>
               <input
@@ -568,7 +573,9 @@ const salvarEdicao = () => {
             </div>
 
             <div className="field">
-              <label>Valor (R$)</label>
+              <label>
+                Valor {editando.groupId ? "TOTAL da compra (R$)" : "(R$)"}
+              </label>
               <input
                 type="number"
                 step="0.01"
@@ -665,20 +672,20 @@ const salvarEdicao = () => {
       {confirmandoExclusao && (
         <div className="modal-overlay">
           <div className="modal-card">
-          <h3>Apagar transação?</h3>
-              <p className="muted small">
-                {confirmandoExclusao.descricao || "Sem descrição"}
-                <br />
-                {formatCurrency(confirmandoExclusao.valor)}
-                {confirmandoExclusao.groupId && (
-                  <>
-                    <br />
-                    <strong style={{ color: "#f97373" }}>
-                      Esta compra é parcelada. Todas as parcelas serão apagadas.
-                    </strong>
-                  </>
-                )}
+            <h3>Apagar transação?</h3>
+            <p className="muted small">
+              {confirmandoExclusao.descricao || "Sem descrição"}
+              <br />
+              {formatCurrency(confirmandoExclusao.valor)}
+            </p>
+
+            {confirmandoExclusao.groupId && (
+              <p className="muted small" style={{ marginTop: 6 }}>
+                ⚠ Esta transação faz parte de uma{" "}
+                <strong>compra parcelada</strong>. Apagar vai remover{" "}
+                <strong>todas as parcelas</strong> desse grupo.
               </p>
+            )}
 
             <div
               style={{
