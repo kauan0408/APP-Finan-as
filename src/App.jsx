@@ -18,7 +18,7 @@ import ReservaPage from "./pages/ReservaPage.jsx";
 // 🔐 Firebase (login Google + banco de dados)
 import { auth, loginComGoogle, logout, db } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 /* ---------------- CONTEXTO DE FINANÇAS ---------------- */
 
@@ -61,23 +61,6 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
-/* Valores padrão */
-const DEFAULT_PROFILE = {
-  nome: "",
-  rendaMensal: "",
-  limiteGastoMensal: "",
-  metaReservaMensal: "",
-  reservaAcumulada: "",
-  diaPagamento: "",
-  avatarBase64: "",
-};
-
-const DEFAULT_RESERVA = {
-  metaMensal: 0,
-  locais: [],
-  movimentos: [],
-};
-
 /* ---------------- COMPONENTE PRINCIPAL ---------------- */
 
 export default function App() {
@@ -85,11 +68,19 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // 🔁 FLAG: já carreguei dados iniciais (nuvem/local) pra este usuário?
+  // 🔁 FLAG: já carreguei dados locais para este usuário?
   const [dadosCarregados, setDadosCarregados] = useState(false);
 
   // Perfil (nome, renda mensal, limite de gasto, dia pagamento, etc.)
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState({
+    nome: "",
+    rendaMensal: "",
+    limiteGastoMensal: "",
+    metaReservaMensal: "",
+    reservaAcumulada: "",
+    diaPagamento: "",
+    avatarBase64: "",
+  });
 
   // Transações (despesas/receitas)
   const [transacoes, setTransacoes] = useState([]);
@@ -98,7 +89,11 @@ export default function App() {
   const [cartoes, setCartoes] = useState([]);
 
   // Reserva de emergência
-  const [reserva, setReserva] = useState(DEFAULT_RESERVA);
+  const [reserva, setReserva] = useState({
+    metaMensal: 0,
+    locais: [], // { id, nome, valor }
+    movimentos: [], // histórico de adições
+  });
 
   // 🔄 MÊS DE REFERÊNCIA GLOBAL (para a visão mensal)
   const hoje = new Date();
@@ -138,112 +133,52 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser || null);
       setAuthLoading(false);
+      // sempre que trocar de usuário, zera a flag
       setDadosCarregados(false);
     });
 
     return () => unsub();
   }, []);
 
-  /* ------- 1) CARREGAR PRIMEIRO DA NUVEM, DEPOIS LOCAL (SE PRECISAR) ------- */
+  /* ------- 1) CARREGAR PRIMEIRO DO LOCALSTORAGE (MODO A) ------- */
 
   useEffect(() => {
     if (!user) return;
 
-    let unsubSnapshot = null;
+    const uid = user.uid;
 
-    (async () => {
-      const uid = user.uid;
-      const userDocRef = doc(db, "users", uid);
+    const storedProfile = loadFromStorage(`profile_${uid}`, null);
+    const storedTransacoes = loadFromStorage(`transacoes_${uid}`, null);
+    const storedCartoes = loadFromStorage(`cartoes_${uid}`, null);
+    const storedReserva = loadFromStorage(`reserva_${uid}`, null);
 
-      try {
-        // 1) Tenta buscar da NUVEM (Firestore)
-        const snap = await getDoc(userDocRef);
-
-        if (snap.exists()) {
-          const data = snap.data();
-
-          const perfilCloud = data.profile || DEFAULT_PROFILE;
-          const transacoesCloud = data.transacoes || [];
-          const cartoesCloud = data.cartoes || [];
-          const reservaCloud = data.reserva || DEFAULT_RESERVA;
-
-          // Atualiza estado com o que está na nuvem
-          setProfile(perfilCloud);
-          setTransacoes(transacoesCloud);
-          setCartoes(cartoesCloud);
-          setReserva(reservaCloud);
-
-          // Também guarda isso no localStorage (cópia)
-          saveToStorage(`profile_${uid}`, perfilCloud);
-          saveToStorage(`transacoes_${uid}`, transacoesCloud);
-          saveToStorage(`cartoes_${uid}`, cartoesCloud);
-          saveToStorage(`reserva_${uid}`, reservaCloud);
-        } else {
-          // 2) Se NÃO existir nada na nuvem, tenta buscar do LOCAL
-          const storedProfile = loadFromStorage(`profile_${uid}`, null);
-          const storedTransacoes = loadFromStorage(`transacoes_${uid}`, null);
-          const storedCartoes = loadFromStorage(`cartoes_${uid}`, null);
-          const storedReserva = loadFromStorage(`reserva_${uid}`, null);
-
-          const perfilInicial = storedProfile || DEFAULT_PROFILE;
-          const transacoesIniciais = storedTransacoes || [];
-          const cartoesIniciais = storedCartoes || [];
-          const reservaInicial = storedReserva || DEFAULT_RESERVA;
-
-          setProfile(perfilInicial);
-          setTransacoes(transacoesIniciais);
-          setCartoes(cartoesIniciais);
-          setReserva(reservaInicial);
-
-          // E joga ISSO pra nuvem (primeiro cadastro desse usuário)
-          await setDoc(
-            userDocRef,
-            {
-              profile: perfilInicial,
-              transacoes: transacoesIniciais,
-              cartoes: cartoesIniciais,
-              reserva: reservaInicial,
-            },
-            { merge: true }
-          );
-        }
-
-        // Marca que já carregamos dados iniciais
-        setDadosCarregados(true);
-
-        // 3) Ouvir em tempo real (sincroniza entre dispositivos)
-        unsubSnapshot = onSnapshot(userDocRef, (docSnap) => {
-          if (!docSnap.exists()) return;
-          const data = docSnap.data();
-
-          if (data.profile) setProfile(data.profile);
-          if (data.transacoes) setTransacoes(data.transacoes);
-          if (data.cartoes) setCartoes(data.cartoes);
-          if (data.reserva) setReserva(data.reserva);
-        });
-      } catch (err) {
-        console.error("Erro ao carregar dados iniciais do Firestore:", err);
-        // Em caso de erro, pelo menos tenta local
-        const uid = user.uid;
-        const storedProfile = loadFromStorage(`profile_${uid}`, DEFAULT_PROFILE);
-        const storedTransacoes = loadFromStorage(`transacoes_${uid}`, []);
-        const storedCartoes = loadFromStorage(`cartoes_${uid}`, []);
-        const storedReserva = loadFromStorage(`reserva_${uid}`, DEFAULT_RESERVA);
-
-        setProfile(storedProfile);
-        setTransacoes(storedTransacoes);
-        setCartoes(storedCartoes);
-        setReserva(storedReserva);
-        setDadosCarregados(true);
+    setProfile(
+      storedProfile || {
+        nome: "",
+        rendaMensal: "",
+        limiteGastoMensal: "",
+        metaReservaMensal: "",
+        reservaAcumulada: "",
+        diaPagamento: "",
+        avatarBase64: "",
       }
-    })();
+    );
 
-    return () => {
-      if (unsubSnapshot) unsubSnapshot();
-    };
+    setTransacoes(storedTransacoes || []);
+    setCartoes(storedCartoes || []);
+    setReserva(
+      storedReserva || {
+        metaMensal: 0,
+        locais: [],
+        movimentos: [],
+      }
+    );
+
+    // ✅ marca que dados locais já foram carregados
+    setDadosCarregados(true);
   }, [user]);
 
-  /* ------- 2) SEMPRE QUE MUDAR (DEPOIS DE CARREGAR), SALVAR NA NUVEM ------- */
+  /* ------- 2) SINCRONIZAR COM FIRESTORE (LOCAL MANDA PRIMEIRO) ------- */
 
   useEffect(() => {
     if (!user || !dadosCarregados) return;
@@ -258,31 +193,65 @@ export default function App() {
       reserva,
     };
 
-    // Sempre mantém backup local
-    saveToStorage(`profile_${uid}`, profile);
-    saveToStorage(`transacoes_${uid}`, transacoes);
-    saveToStorage(`cartoes_${uid}`, cartoes);
-    saveToStorage(`reserva_${uid}`, reserva);
-
-    // Sem internet → guarda como pendência
+    // Sem internet → guarda como "pendência"
     if (!navigator.onLine) {
       console.log("Sem internet: salvando atualização pendente no storage.");
       saveToStorage(`pendingSync_${uid}`, payload);
       return;
     }
 
-    // Com internet → manda pro Firestore
+    // Com internet → manda o estado ATUAL (local) pro Firestore
     setDoc(userDocRef, payload, { merge: true })
       .then(() => {
+        // Deu certo, limpa pendência
         saveToStorage(`pendingSync_${uid}`, null);
       })
       .catch((err) => {
         console.error("Erro ao salvar dados no Firestore:", err);
+        // Se falhar, guarda como pendência
         saveToStorage(`pendingSync_${uid}`, payload);
       });
-  }, [user, dadosCarregados, profile, transacoes, cartoes, reserva]);
 
-  /* ------- 3) SINCRONIZAR PENDÊNCIAS QUANDO VOLTAR A INTERNET ------- */
+    // Depois que mandamos o local pro Firestore, ligamos o snapshot
+    const unsub = onSnapshot(userDocRef, (docSnap) => {
+      if (!docSnap.exists()) return;
+      const data = docSnap.data();
+
+      // Aqui o Firestore já recebeu o "local", então não deve sobrescrever com coisa velha.
+      if (data.profile) setProfile(data.profile);
+      if (data.transacoes) setTransacoes(data.transacoes);
+      if (data.cartoes) setCartoes(data.cartoes);
+      if (data.reserva) setReserva(data.reserva);
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [user, dadosCarregados]); // dispara quando terminar de carregar local
+
+  /* ------- 3) BACKUP LOCAL POR CONTA (sempre que mudar) ------- */
+
+  useEffect(() => {
+    if (!user) return;
+    saveToStorage(`profile_${user.uid}`, profile);
+  }, [user, profile]);
+
+  useEffect(() => {
+    if (!user) return;
+    saveToStorage(`transacoes_${user.uid}`, transacoes);
+  }, [user, transacoes]);
+
+  useEffect(() => {
+    if (!user) return;
+    saveToStorage(`cartoes_${user.uid}`, cartoes);
+  }, [user, cartoes]);
+
+  useEffect(() => {
+    if (!user) return;
+    saveToStorage(`reserva_${user.uid}`, reserva);
+  }, [user, reserva]);
+
+  /* ------- 4) SINCRONIZAR PENDÊNCIAS QUANDO VOLTAR A INTERNET ------- */
 
   useEffect(() => {
     if (!user || !dadosCarregados) return;
@@ -320,6 +289,7 @@ export default function App() {
     setProfile((prev) => ({ ...prev, ...novosDados }));
   };
 
+  // 👉 AGORA O APP SÓ ADICIONA UMA TRANSAÇÃO PRONTA (parcelas já vêm montadas da TransacoesPage)
   const adicionarTransacao = (dados) => {
     const nova = {
       ...dados,
@@ -372,10 +342,12 @@ export default function App() {
       reserva,
       setReserva: atualizarReserva,
 
+      // 🔄 mês global
       mesReferencia,
       mudarMesReferencia,
       irParaMesAtual,
 
+      // login
       loginComGoogle,
       logout,
     }),
