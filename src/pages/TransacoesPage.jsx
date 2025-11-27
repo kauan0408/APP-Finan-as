@@ -20,7 +20,7 @@ export default function TransacoesPage() {
     adicionarTransacao,
     cartoes,
     mesReferencia, // 🔄 mês selecionado na visão geral
-    transacoes, // 👈 agora também pego as transações pra calcular limite de cartão
+    transacoes, // pra calcular limite de cartão
   } = useFinance();
 
   const [tipo, setTipo] = useState("despesa");
@@ -84,9 +84,7 @@ export default function TransacoesPage() {
       return;
     }
 
-    const baseDate = dataBaseISO
-      ? new Date(dataBaseISO)
-      : new Date();
+    const baseDate = dataBaseISO ? new Date(dataBaseISO) : new Date();
 
     const isDespesaLocal = tipoForm === "despesa";
     const ehDespesaCreditoLocal =
@@ -94,12 +92,17 @@ export default function TransacoesPage() {
 
     const listaParaSalvar = [];
 
-    // 👉 COMPRA PARCELADA NO CRÉDITO
+    // 👉 COMPRA PARCELADA NO CRÉDITO (até 24x)
     if (ehDespesaCreditoLocal && parceladoForm && numeroParcelasForm > 1) {
-      const n = Math.min(
-        Math.max(parseInt(numeroParcelasForm, 10) || 2, 2),
-        36
-      );
+      let n = parseInt(numeroParcelasForm, 10) || 2;
+      if (n < 2) n = 2;
+      if (n > 24) n = 24;
+
+      const groupId =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : Date.now().toString(36) + Math.random().toString(36).slice(2);
+
       const valorParcela = v / n;
 
       for (let i = 1; i <= n; i++) {
@@ -108,7 +111,9 @@ export default function TransacoesPage() {
 
         listaParaSalvar.push({
           tipo: "despesa",
-          valor: valorParcela,
+          valor: Number(valorParcela.toFixed(2)),
+          totalCompra: v,
+          groupId,
           descricao: descricaoForm?.trim()
             ? `${descricaoForm} (parc. ${i}/${n})`
             : `Parcela ${i}/${n}`,
@@ -121,12 +126,15 @@ export default function TransacoesPage() {
           parcelaTotal: n,
         });
       }
-      mostrarMensagem(`Compra parcelada em ${numeroParcelasForm}x lançada.`);
+
+      mostrarMensagem(`Compra parcelada em ${n}x lançada.`);
     } else {
       // 👉 Lançamento normal (uma única transação)
       listaParaSalvar.push({
         tipo: tipoForm, // "despesa" ou "receita"
         valor: v,
+        totalCompra: v,
+        groupId: null,
         descricao: descricaoForm,
         categoria: isDespesaLocal ? categoriaForm : null,
         formaPagamento: formaForm,
@@ -410,7 +418,7 @@ export default function TransacoesPage() {
                   <input
                     type="number"
                     min="2"
-                    max="36"
+                    max="24"
                     value={numeroParcelas}
                     onChange={(e) => setNumeroParcelas(e.target.value)}
                   />
