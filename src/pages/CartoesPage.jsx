@@ -27,7 +27,7 @@ export default function CartoesPage() {
   const [cartaoEditando, setCartaoEditando] = useState(null);
   const [cartaoParaExcluir, setCartaoParaExcluir] = useState(null);
 
-  // 🔄 Transações SOMENTE do mês/ano selecionado
+  // 🔄 Transações SOMENTE do mês/ano selecionado (para "gasto no mês")
   const transacoesDoMes = useMemo(() => {
     const { mes, ano } = mesReferencia;
     return transacoes.filter((t) => {
@@ -37,36 +37,65 @@ export default function CartoesPage() {
     });
   }, [transacoes, mesReferencia]);
 
-  // resumo de cada cartão (gasto no crédito NESSE mês)
+  // 🔄 Transações de crédito DESSE mês em diante (para limite comprometido)
+  const transacoesDesdeMes = useMemo(() => {
+    const { mes, ano } = mesReferencia;
+    const inicioMes = new Date(ano, mes, 1);
+    return transacoes.filter((t) => {
+      if (!t.dataHora) return false;
+      const d = new Date(t.dataHora);
+      // tudo que é desse mês ou futuro conta pro limite
+      return d >= inicioMes;
+    });
+  }, [transacoes, mesReferencia]);
+
+  // resumo de cada cartão:
+  // - totalGastoMes: só parcelas que caem no mês escolhido
+  // - totalComprometido: parcelas desse mês em diante (mês atual + futuros)
   const resumoCartoes = useMemo(() => {
     return cartoes.map((cartao) => {
-      const compras = transacoesDoMes.filter(
+      // 📌 GASTO NO MÊS (apenas as parcelas do mês atual)
+      const comprasMes = transacoesDoMes.filter(
         (t) =>
           t.tipo === "despesa" &&
           t.formaPagamento === "credito" &&
           t.cartaoId === cartao.id
       );
 
-      const totalComprasMes = compras.reduce(
+      const totalGastoMes = comprasMes.reduce(
         (soma, t) => soma + Number(t.valor || 0),
         0
       );
 
-      const perc =
+      // 📌 LIMITE COMPROMETIDO (todas parcelas desse mês em diante)
+      const comprasComprometidas = transacoesDesdeMes.filter(
+        (t) =>
+          t.tipo === "despesa" &&
+          t.formaPagamento === "credito" &&
+          t.cartaoId === cartao.id
+      );
+
+      const totalComprometido = comprasComprometidas.reduce(
+        (soma, t) => soma + Number(t.valor || 0),
+        0
+      );
+
+      const percComprometido =
         cartao.limite > 0
-          ? Math.min(100, (totalComprasMes / cartao.limite) * 100)
+          ? Math.min(100, (totalComprometido / cartao.limite) * 100)
           : 0;
 
-      const limiteDisponivelMes = cartao.limite - totalComprasMes;
+      const limiteDisponivel = cartao.limite - totalComprometido;
 
       return {
         ...cartao,
-        totalGastoMes: totalComprasMes,
-        percGastoMes: perc,
-        limiteDisponivelMes,
+        totalGastoMes,
+        totalComprometido,
+        percComprometido,
+        limiteDisponivel,
       };
     });
-  }, [cartoes, transacoesDoMes]);
+  }, [cartoes, transacoesDoMes, transacoesDesdeMes]);
 
   function handleCadastrarCartao(e) {
     e.preventDefault();
@@ -209,12 +238,12 @@ export default function CartoesPage() {
                         Fechamento: dia {cartao.diaFechamento || 1}
                       </p>
                       <p className="muted small">
-                        Limite disponível neste mês:{" "}
-                        {formatCurrency(cartao.limiteDisponivelMes)}
+                        Limite disponível (parcelas atuais + futuras):{" "}
+                        {formatCurrency(cartao.limiteDisponivel)}
                       </p>
                     </div>
                     <div className="align-right">
-                      <p className="history-summary-label">Gasto no mês</p>
+                      <p className="history-summary-label">Gasto neste mês</p>
                       <p className="history-summary-value negative">
                         {formatCurrency(cartao.totalGastoMes)}
                       </p>
@@ -225,12 +254,14 @@ export default function CartoesPage() {
                     <div className="progress-bar">
                       <div
                         className="progress-fill"
-                        style={{ width: `${cartao.percGastoMes.toFixed(0)}%` }}
+                        style={{
+                          width: `${cartao.percComprometido.toFixed(0)}%`,
+                        }}
                       />
                     </div>
                     <span className="progress-label">
-                      {cartao.percGastoMes.toFixed(0)}% do limite usado neste
-                      mês.
+                      {cartao.percComprometido.toFixed(0)}% do limite está
+                      comprometido com parcelas deste mês e dos próximos.
                     </span>
                   </div>
 
