@@ -182,11 +182,22 @@ export default function HistoricoPage() {
   const abrirEdicao = (t) => {
     setEditando(t);
     setDescricaoEdit(t.descricao || "");
-    setValorEdit(String(t.valor || ""));
     setTipoEdit(t.tipo || "despesa");
     setCategoriaEdit(t.categoria || "Essencial");
     setFormaEdit(t.formaPagamento || "dinheiro");
     setCartaoEdit(t.cartaoId || "");
+
+    // 👉 Se for compra parcelada, mostrar o VALOR TOTAL (soma de todas as parcelas)
+    if (t.groupId) {
+      const parcelas = transacoes.filter((p) => p.groupId === t.groupId);
+      const totalCompra = parcelas.reduce(
+        (soma, p) => soma + Number(p.valor || 0),
+        0
+      );
+      setValorEdit(String(totalCompra.toFixed(2)));
+    } else {
+      setValorEdit(String(t.valor || ""));
+    }
   };
 
   const fecharEdicao = () => {
@@ -558,7 +569,8 @@ export default function HistoricoPage() {
             {editando.groupId && (
               <p className="muted small" style={{ marginBottom: 6 }}>
                 Esta transação faz parte de uma{" "}
-                <strong>compra parcelada</strong>. As alterações vão valer
+                <strong>compra parcelada</strong>. O valor abaixo é o{" "}
+                <strong>TOTAL</strong> da compra. As alterações vão valer
                 para todas as parcelas desse grupo.
               </p>
             )}
@@ -574,7 +586,10 @@ export default function HistoricoPage() {
 
             <div className="field">
               <label>
-                Valor {editando.groupId ? "TOTAL da compra (R$)" : "(R$)"}
+                Valor{" "}
+                {editando.groupId
+                  ? "TOTAL da compra (R$)"
+                  : "(R$)"}
               </label>
               <input
                 type="number"
@@ -583,6 +598,23 @@ export default function HistoricoPage() {
                 onChange={(e) => setValorEdit(e.target.value)}
               />
             </div>
+
+            {editando.groupId && (() => {
+              const parcelas = transacoes.filter(
+                (p) => p.groupId === editando.groupId
+              );
+              const totalParcelas = parcelas.length || editando.parcelaTotal || 1;
+              const totalCompra = parseFloat(valorEdit || "0");
+              const valorParcela =
+                totalParcelas > 0 ? totalCompra / totalParcelas : 0;
+              return (
+                <p className="muted small" style={{ marginTop: 4 }}>
+                  {totalParcelas}x de aproximadamente{" "}
+                  <strong>{formatCurrency(valorParcela || 0)}</strong>
+                  {" "} (recalculado quando salvar).
+                </p>
+              );
+            })()}
 
             <div className="field">
               <label>Tipo</label>
