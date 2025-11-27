@@ -80,9 +80,7 @@ export default function App() {
     reservaAcumulada: "",
     diaPagamento: "",
     avatarBase64: "",
-    salariosPorMes: {}, // 👈 novo
   });
-  
 
   // Transações (despesas/receitas)
   const [transacoes, setTransacoes] = useState([]);
@@ -163,9 +161,8 @@ export default function App() {
         reservaAcumulada: "",
         diaPagamento: "",
         avatarBase64: "",
-        salariosPorMes: {}, // 👈 novo
       }
-    );    
+    );
 
     setTransacoes(storedTransacoes || []);
     setCartoes(storedCartoes || []);
@@ -292,13 +289,51 @@ export default function App() {
     setProfile((prev) => ({ ...prev, ...novosDados }));
   };
 
+  // 🔁 AQUI ESTÁ A MUDANÇA: suporte a parcelamento até 24x no crédito
   const adicionarTransacao = (dados) => {
-    const nova = {
-      ...dados,
-      id: generateId(),
-      dataHora: dados.dataHora || new Date().toISOString(),
-    };
-    setTransacoes((prev) => [nova, ...prev]);
+    let parcelas = Number(dados.parcelas || 1);
+    const valorTotal = Number(dados.valor || 0);
+
+    // garante mínimo 1 e máximo 24
+    if (isNaN(parcelas) || parcelas < 1) parcelas = 1;
+    if (parcelas > 24) parcelas = 24;
+
+    // Se NÃO for compra parcelada no crédito, ou não for despesa → transação única
+    if (
+      parcelas === 1 ||
+      dados.formaPagamento !== "credito" ||
+      dados.tipo !== "despesa"
+    ) {
+      const nova = {
+        ...dados,
+        id: generateId(),
+        dataHora: dados.dataHora || new Date().toISOString(),
+        parcelaAtual: 1,
+        parcelas: 1,
+      };
+      setTransacoes((prev) => [nova, ...prev]);
+      return;
+    }
+
+    // 💳 COMPRA PARCELADA NO CRÉDITO (até 24x)
+    const valorPorParcela = valorTotal / parcelas;
+    const novasParcelas = [];
+
+    for (let i = 0; i < parcelas; i++) {
+      const data = new Date(dados.dataHora || new Date());
+      data.setMonth(data.getMonth() + i);
+
+      novasParcelas.push({
+        ...dados,
+        id: generateId(),
+        valor: Number(valorPorParcela.toFixed(2)),
+        parcelaAtual: i + 1,
+        parcelas,
+        dataHora: data.toISOString(),
+      });
+    }
+
+    setTransacoes((prev) => [...novasParcelas, ...prev]);
   };
 
   const atualizarTransacao = (id, dadosAtualizados) => {
