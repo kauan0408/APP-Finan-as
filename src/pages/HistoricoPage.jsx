@@ -48,7 +48,7 @@ export default function HistoricoPage() {
   const [formaEdit, setFormaEdit] = useState("dinheiro");
   const [cartaoEdit, setCartaoEdit] = useState("");
 
-  // 🗑️ modal de exclusão (guarda a transação selecionada)
+  // 🗑️ modal de exclusão
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null);
 
   const cartaoNomePorId = useMemo(() => {
@@ -182,22 +182,17 @@ export default function HistoricoPage() {
   const abrirEdicao = (t) => {
     setEditando(t);
     setDescricaoEdit(t.descricao || "");
+
+    const valorTotal = t.groupId && t.parcelaTotal && t.parcelaTotal > 1
+      ? t.totalCompra ||
+        Number(t.valor || 0) * Number(t.parcelaTotal || 1)
+      : t.valor || "";
+
+    setValorEdit(String(valorTotal));
     setTipoEdit(t.tipo || "despesa");
     setCategoriaEdit(t.categoria || "Essencial");
     setFormaEdit(t.formaPagamento || "dinheiro");
     setCartaoEdit(t.cartaoId || "");
-
-    // 👉 Se for compra parcelada, mostrar o VALOR TOTAL (soma de todas as parcelas)
-    if (t.groupId) {
-      const parcelas = transacoes.filter((p) => p.groupId === t.groupId);
-      const totalCompra = parcelas.reduce(
-        (soma, p) => soma + Number(p.valor || 0),
-        0
-      );
-      setValorEdit(String(totalCompra.toFixed(2)));
-    } else {
-      setValorEdit(String(t.valor || ""));
-    }
   };
 
   const fecharEdicao = () => {
@@ -221,24 +216,24 @@ export default function HistoricoPage() {
       return;
     }
 
-    // 🔥 SE FOR COMPRA PARCELADA (tem groupId) → EDITA TODAS AS PARCELAS
-    if (t.groupId) {
+    // 🔥 SE FOR PARCELA → EDITA TODAS DO GRUPO
+    if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
       const parcelas = transacoes
         .filter((p) => p.groupId === t.groupId)
         .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
 
-      const totalParcelas = parcelas.length || 1;
+      const totalParcelas = parcelas.length || t.parcelaTotal;
       const valorParcela = v / totalParcelas;
 
       parcelas.forEach((p) => {
         atualizarTransacao(p.id, {
-          ...p,
           descricao: descricaoEdit,
           tipo: tipoEdit,
           categoria: tipoEdit === "despesa" ? categoriaEdit : null,
           formaPagamento: formaEdit,
-          cartaoId: formaEdit === "credito" ? cartaoEdit || "" : null,
-          valor: valorParcela,
+          cartaoId: formaEdit === "credito" ? cartaoEdit || null : null,
+          valor: Number(valorParcela.toFixed(2)),
+          totalCompra: v,
         });
       });
 
@@ -246,7 +241,7 @@ export default function HistoricoPage() {
       return;
     }
 
-    // 🌈 SE NÃO FOR PARCELADA → EDITA SÓ ESSA
+    // 🧾 TRANSAÇÃO NORMAL (sem grupo)
     const dadosAtualizados = {
       tipo: tipoEdit,
       valor: v,
@@ -254,35 +249,35 @@ export default function HistoricoPage() {
       categoria: tipoEdit === "despesa" ? categoriaEdit : null,
       formaPagamento: formaEdit,
       cartaoId: formaEdit === "credito" ? cartaoEdit || null : null,
+      totalCompra: v,
     };
 
     atualizarTransacao(editando.id, dadosAtualizados);
     fecharEdicao();
   };
 
-  // 🗑️ confirmar exclusão (apaga tudo se for parcelada)
+  // 🗑️ confirmar exclusão
   const confirmarApagar = () => {
     if (!confirmandoExclusao) return;
 
     const t = confirmandoExclusao;
 
-    if (t.groupId) {
-      // 🔥 Compra parcelada: remove TODAS as parcelas com o mesmo groupId
-      const parcelas = transacoes.filter((p) => p.groupId === t.groupId);
-      parcelas.forEach((p) => {
-        removerTransacao(p.id);
-      });
+    // 🔥 Se for parcela com groupId → apaga TODAS as parcelas da compra
+    if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
+      const grupoId = t.groupId;
+      const doGrupo = transacoes.filter((p) => p.groupId === grupoId);
 
-      if (editando && editando.groupId === t.groupId) {
-        fecharEdicao();
-      }
+      doGrupo.forEach((p) => removerTransacao(p.id));
     } else {
-      // Transação normal (não parcelada)
       removerTransacao(t.id);
+    }
 
-      if (editando && editando.id === t.id) {
-        fecharEdicao();
-      }
+    if (
+      editando &&
+      (editando.id === t.id ||
+        (t.groupId && editando.groupId === t.groupId))
+    ) {
+      fecharEdicao();
     }
 
     setConfirmandoExclusao(null);
@@ -454,7 +449,7 @@ export default function HistoricoPage() {
         </div>
       </div>
 
-      {/* Lista por dia – aqui vai TUDO (de toda a vida), com filtros, SEM limitar por mês */}
+      {/* Lista por dia */}
       {totalTransacoesLista === 0 ? (
         <p className="muted mt">Nenhuma transação encontrada.</p>
       ) : (
@@ -503,20 +498,18 @@ export default function HistoricoPage() {
                           ` · ${(t.categoria || "").toString()}`}
                       </div>
 
-                      {t.parcelaTotal &&
-                        t.parcelaTotal > 1 &&
-                        t.parcelaAtual === 1 && (
-                          <div className="muted small">
-                            Parcela {t.parcelaAtual}/{t.parcelaTotal} ·{" "}
-                            <strong>
-                              Total da compra:{" "}
-                              {formatCurrency(
+                      {t.parcelaTotal && t.parcelaTotal > 1 && (
+                        <div className="muted small">
+                          Compra parcelada em {t.parcelaTotal}x · total{" "}
+                          <strong>
+                            {formatCurrency(
+                              t.totalCompra ||
                                 Number(t.valor || 0) *
                                   Number(t.parcelaTotal || 1)
-                              )}
-                            </strong>
-                          </div>
-                        )}
+                            )}
+                          </strong>
+                        </div>
+                      )}
                     </div>
                     <div className="align-right">
                       <span
@@ -566,12 +559,11 @@ export default function HistoricoPage() {
               {formatDate(editando.dataHora)} • {formatTime(editando.dataHora)}
             </p>
 
-            {editando.groupId && (
-              <p className="muted small" style={{ marginBottom: 6 }}>
-                Esta transação faz parte de uma{" "}
-                <strong>compra parcelada</strong>. O valor abaixo é o{" "}
-                <strong>TOTAL</strong> da compra. As alterações vão valer
-                para todas as parcelas desse grupo.
+            {editando.groupId && editando.parcelaTotal > 1 && (
+              <p className="muted small" style={{ marginTop: 4 }}>
+                Compra parcelada em {editando.parcelaTotal}x. <br />
+                Você está editando o <strong>valor TOTAL</strong> da compra;
+                todas as parcelas serão atualizadas.
               </p>
             )}
 
@@ -586,10 +578,9 @@ export default function HistoricoPage() {
 
             <div className="field">
               <label>
-                Valor{" "}
-                {editando.groupId
-                  ? "TOTAL da compra (R$)"
-                  : "(R$)"}
+                {editando.groupId && editando.parcelaTotal > 1
+                  ? "Valor total da compra (R$)"
+                  : "Valor (R$)"}
               </label>
               <input
                 type="number"
@@ -598,23 +589,6 @@ export default function HistoricoPage() {
                 onChange={(e) => setValorEdit(e.target.value)}
               />
             </div>
-
-            {editando.groupId && (() => {
-              const parcelas = transacoes.filter(
-                (p) => p.groupId === editando.groupId
-              );
-              const totalParcelas = parcelas.length || editando.parcelaTotal || 1;
-              const totalCompra = parseFloat(valorEdit || "0");
-              const valorParcela =
-                totalParcelas > 0 ? totalCompra / totalParcelas : 0;
-              return (
-                <p className="muted small" style={{ marginTop: 4 }}>
-                  {totalParcelas}x de aproximadamente{" "}
-                  <strong>{formatCurrency(valorParcela || 0)}</strong>
-                  {" "} (recalculado quando salvar).
-                </p>
-              );
-            })()}
 
             <div className="field">
               <label>Tipo</label>
@@ -708,16 +682,33 @@ export default function HistoricoPage() {
             <p className="muted small">
               {confirmandoExclusao.descricao || "Sem descrição"}
               <br />
-              {formatCurrency(confirmandoExclusao.valor)}
+              {confirmandoExclusao.groupId &&
+              confirmandoExclusao.parcelaTotal > 1 ? (
+                <>
+                  Total da compra:{" "}
+                  <strong>
+                    {formatCurrency(
+                      confirmandoExclusao.totalCompra ||
+                        Number(confirmandoExclusao.valor || 0) *
+                          Number(confirmandoExclusao.parcelaTotal || 1)
+                    )}
+                  </strong>{" "}
+                  ({confirmandoExclusao.parcelaTotal}x)
+                </>
+              ) : (
+                <strong>
+                  {formatCurrency(confirmandoExclusao.valor)}
+                </strong>
+              )}
             </p>
 
-            {confirmandoExclusao.groupId && (
-              <p className="muted small" style={{ marginTop: 6 }}>
-                ⚠ Esta transação faz parte de uma{" "}
-                <strong>compra parcelada</strong>. Apagar vai remover{" "}
-                <strong>todas as parcelas</strong> desse grupo.
-              </p>
-            )}
+            {confirmandoExclusao.groupId &&
+              confirmandoExclusao.parcelaTotal > 1 && (
+                <p className="muted small" style={{ marginTop: 6 }}>
+                  Ao apagar, <strong>TODAS</strong> as parcelas dessa compra
+                  serão removidas.
+                </p>
+              )}
 
             <div
               style={{
