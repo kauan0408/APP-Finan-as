@@ -1,5 +1,5 @@
 // src/pages/TransacoesPage.jsx
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useFinance } from "../App.jsx";
 
 // helper pra montar yyyy-mm-dd
@@ -19,8 +19,8 @@ export default function TransacoesPage() {
   const {
     adicionarTransacao,
     cartoes,
-    mesReferencia, // 🔄 mês selecionado na visão geral
-    transacoes, // 👈 agora também pego as transações pra calcular limite de cartão
+    mesReferencia,
+    transacoes,
   } = useFinance();
 
   const [tipo, setTipo] = useState("despesa");
@@ -32,11 +32,9 @@ export default function TransacoesPage() {
   const [fixo, setFixo] = useState(false);
   const [mensagem, setMensagem] = useState("");
 
-  // 💳 PARCELAMENTO
   const [parcelado, setParcelado] = useState(false);
   const [numeroParcelas, setNumeroParcelas] = useState(2);
 
-  // 📅 DATA DA TRANSAÇÃO (começa no mês selecionado)
   const [dataTransacao, setDataTransacao] = useState(() => {
     const hoje = new Date();
     const ano = mesReferencia?.ano ?? hoje.getFullYear();
@@ -47,23 +45,20 @@ export default function TransacoesPage() {
 
   const isDespesa = tipo === "despesa";
 
-  // 🔔 modal de “limite estourado”
   const [mostrarConfirmCredito, setMostrarConfirmCredito] = useState(false);
   const [pendenteCredito, setPendenteCredito] = useState(null);
-  // pendenteCredito = {
-  //   dados: { ...tudo do formulário já preparado },
-  //   excedente,
-  //   limite,
-  //   gastoAtual,
-  //   cartaoNome
-  // }
+
+  // 🎤 ESTADOS PARA GRAVAÇÃO DE ÁUDIO
+  const [gravando, setGravando] = useState(false);
+  const [processandoAudio, setProcessandoAudio] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   function mostrarMensagem(texto) {
     setMensagem(texto);
     setTimeout(() => setMensagem(""), 2200);
   }
 
-  // 👉 função que realmente cria as transações (normal ou parcelada)
   const processarTransacao = (dados) => {
     const {
       tipoForm,
@@ -92,7 +87,6 @@ export default function TransacoesPage() {
 
     const listaParaSalvar = [];
 
-    // 👉 COMPRA PARCELADA NO CRÉDITO
     if (ehDespesaCreditoLocal && parceladoForm && numeroParcelasForm > 1) {
       const n = Math.min(
         Math.max(parseInt(numeroParcelasForm, 10) || 2, 2),
@@ -100,7 +94,6 @@ export default function TransacoesPage() {
       );
       const valorParcela = v / n;
 
-      // 🔑 mesmo groupId para todas as parcelas desta compra
       const groupId =
         Date.now().toString(36) + Math.random().toString(36).slice(2);
 
@@ -117,10 +110,9 @@ export default function TransacoesPage() {
           categoria: categoriaForm,
           formaPagamento: "credito",
           cartaoId: cartaoIdForm,
-          fixo: false, // parcela não é gasto fixo automático
+          fixo: false,
           dataHora: dataParcela.toISOString(),
 
-          // 👇 infos de parcelamento
           parcelaAtual: i,
           parcelaTotal: n,
           groupId,
@@ -129,9 +121,8 @@ export default function TransacoesPage() {
       }
       mostrarMensagem(`Compra parcelada em ${numeroParcelasForm}x lançada.`);
     } else {
-      // 👉 Lançamento normal (uma única transação)
       listaParaSalvar.push({
-        tipo: tipoForm, // "despesa" ou "receita"
+        tipo: tipoForm,
         valor: v,
         descricao: descricaoForm,
         categoria: isDespesaLocal ? categoriaForm : null,
@@ -147,10 +138,8 @@ export default function TransacoesPage() {
       mostrarMensagem("Transação salva!");
     }
 
-    // Salva tudo no contexto
     listaParaSalvar.forEach((t) => adicionarTransacao(t));
 
-    // limpa o formulário (mantém a data)
     setValor("");
     setDescricao("");
     setCategoria("Essencial");
@@ -171,10 +160,9 @@ export default function TransacoesPage() {
       return;
     }
 
-    // data base escolhida no input
     let baseDate;
     if (dataTransacao) {
-      baseDate = new Date(dataTransacao + "T12:00:00"); // meio-dia pra evitar fuso
+      baseDate = new Date(dataTransacao + "T12:00:00");
     } else {
       baseDate = new Date();
     }
@@ -182,7 +170,6 @@ export default function TransacoesPage() {
     const ehDespesaCredito =
       isDespesa && formaPagamento === "credito" && cartaoId;
 
-    // 🔍 se for despesa no crédito, confere limite do cartão
     if (ehDespesaCredito) {
       const cartao = cartoes.find((c) => c.id === cartaoId);
       const limite = cartao?.limite || 0;
@@ -208,7 +195,6 @@ export default function TransacoesPage() {
         const gastoAtual = Math.max(0, totalCompras - totalPagamentos);
         const restante = limite - gastoAtual;
 
-        // ⚠️ BANCO CONTA O VALOR TOTAL DA COMPRA (v), NÃO SÓ A PARCELA
         if (v > restante + 0.01) {
           const excedente = v - Math.max(restante, 0);
 
@@ -231,12 +217,11 @@ export default function TransacoesPage() {
             cartaoNome: cartao?.nome || "Cartão",
           });
           setMostrarConfirmCredito(true);
-          return; // não lança agora, espera confirmação
+          return;
         }
       }
     }
 
-    // 👉 se não estourou limite, segue fluxo normal
     processarTransacao({
       tipoForm: tipo,
       valorForm: valor,
@@ -251,7 +236,6 @@ export default function TransacoesPage() {
     });
   };
 
-  // Sempre que trocar tipo, faz sentido ajustar coisas
   const onChangeTipo = (novoTipo) => {
     setTipo(novoTipo);
     if (novoTipo === "receita") {
@@ -281,11 +265,228 @@ export default function TransacoesPage() {
     setMostrarConfirmCredito(false);
   };
 
+  // 🎤 FUNÇÕES DE GRAVAÇÃO DE ÁUDIO
+  const iniciarGravacao = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await processarAudio(audioBlob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start();
+      setGravando(true);
+      mostrarMensagem("🎤 Gravando... Fale sua transação!");
+    } catch (error) {
+      console.error("Erro ao acessar microfone:", error);
+      mostrarMensagem("❌ Erro ao acessar o microfone");
+    }
+  };
+
+  const pararGravacao = () => {
+    if (mediaRecorderRef.current && gravando) {
+      mediaRecorderRef.current.stop();
+      setGravando(false);
+      setProcessandoAudio(true);
+    }
+  };
+
+  const processarAudio = async (audioBlob) => {
+    try {
+      // Converte o áudio para base64
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        const base64Audio = reader.result.split(",")[1];
+
+        // Chama a API de transcrição (Web Speech API ou serviço externo)
+        const texto = await transcreverAudio(base64Audio);
+        
+        if (texto) {
+          // Extrai informações do texto transcrito
+          extrairDadosDoTexto(texto);
+          mostrarMensagem("✅ Transação extraída do áudio!");
+        } else {
+          mostrarMensagem("❌ Não foi possível processar o áudio");
+        }
+        
+        setProcessandoAudio(false);
+      };
+    } catch (error) {
+      console.error("Erro ao processar áudio:", error);
+      mostrarMensagem("❌ Erro ao processar áudio");
+      setProcessandoAudio(false);
+    }
+  };
+
+  const transcreverAudio = async (base64Audio) => {
+    // Opção 1: Usar Web Speech API (funciona offline, mas menos preciso)
+    // Opção 2: Usar serviço externo como OpenAI Whisper, Google Speech-to-Text, etc.
+    
+    // Exemplo simplificado - você precisará implementar a chamada real à API
+    // Por enquanto, retorna um exemplo para demonstração
+    
+    try {
+      // Aqui você faria a chamada para sua API de transcrição
+      // Exemplo com fetch para um endpoint hipotético:
+      /*
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: base64Audio })
+      });
+      const data = await response.json();
+      return data.text;
+      */
+      
+      // Por enquanto, simula um retorno
+      return "despesa de 50 reais no mercado categoria essencial pix";
+    } catch (error) {
+      console.error("Erro na transcrição:", error);
+      return null;
+    }
+  };
+
+  const extrairDadosDoTexto = (texto) => {
+    const textoLower = texto.toLowerCase();
+    
+    // Extrai tipo (despesa ou receita)
+    if (textoLower.includes("receita") || textoLower.includes("ganho") || textoLower.includes("salário")) {
+      setTipo("receita");
+    } else {
+      setTipo("despesa");
+    }
+
+    // Extrai valor (procura por números seguidos de "reais" ou "R$")
+    const regexValor = /(\d+(?:[.,]\d{1,2})?)\s*(?:reais?|r\$|brl)/i;
+    const matchValor = texto.match(regexValor);
+    if (matchValor) {
+      setValor(matchValor[1].replace(",", "."));
+    }
+
+    // Extrai descrição (palavras entre o valor e a categoria/forma de pagamento)
+    const palavrasChave = ["categoria", "essencial", "besteira", "lazer", "pix", "débito", "crédito", "dinheiro"];
+    let descricaoExtraida = "";
+    const palavras = texto.split(" ");
+    let capturando = false;
+    
+    for (let palavra of palavras) {
+      if (matchValor && palavra.includes(matchValor[1])) {
+        capturando = true;
+        continue;
+      }
+      if (capturando && !palavrasChave.some(p => palavra.toLowerCase().includes(p))) {
+        descricaoExtraida += palavra + " ";
+      }
+      if (palavrasChave.some(p => palavra.toLowerCase().includes(p))) {
+        break;
+      }
+    }
+    
+    if (descricaoExtraida.trim()) {
+      setDescricao(descricaoExtraida.trim());
+    }
+
+    // Extrai categoria
+    if (textoLower.includes("essencial")) {
+      setCategoria("Essencial");
+    } else if (textoLower.includes("besteira")) {
+      setCategoria("Besteira");
+    } else if (textoLower.includes("lazer")) {
+      setCategoria("Lazer");
+    }
+
+    // Extrai forma de pagamento
+    if (textoLower.includes("pix")) {
+      setFormaPagamento("pix");
+    } else if (textoLower.includes("débito") || textoLower.includes("debito")) {
+      setFormaPagamento("debito");
+    } else if (textoLower.includes("crédito") || textoLower.includes("credito")) {
+      setFormaPagamento("credito");
+    } else if (textoLower.includes("dinheiro")) {
+      setFormaPagamento("dinheiro");
+    }
+
+    // Extrai se é fixo
+    if (textoLower.includes("fixo") || textoLower.includes("mensal") || textoLower.includes("todo mês")) {
+      setFixo(true);
+    }
+
+    // Extrai parcelamento
+    const regexParcelas = /(\d+)\s*(?:vezes|parcelas|x)/i;
+    const matchParcelas = texto.match(regexParcelas);
+    if (matchParcelas && formaPagamento === "credito") {
+      setParcelado(true);
+      setNumeroParcelas(parseInt(matchParcelas[1]));
+    }
+  };
+
   return (
     <div className="page">
       <h2 className="page-title">Transações</h2>
 
       <div className="card">
+        {/* 🎤 BOTÃO DE GRAVAÇÃO DE ÁUDIO */}
+        <div style={{ marginBottom: 20, textAlign: "center" }}>
+          {!gravando && !processandoAudio && (
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={iniciarGravacao}
+              style={{
+                background: "#10b981",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                margin: "0 auto",
+              }}
+            >
+              🎤 Gravar transação por áudio
+            </button>
+          )}
+          
+          {gravando && (
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={pararGravacao}
+              style={{
+                background: "#ef4444",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                margin: "0 auto",
+                animation: "pulse 1.5s infinite",
+              }}
+            >
+              ⏹️ Parar gravação
+            </button>
+          )}
+          
+          {processandoAudio && (
+            <div style={{ color: "#6b7280" }}>
+              ⏳ Processando áudio...
+            </div>
+          )}
+          
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Exemplo: "Despesa de 50 reais no mercado, categoria essencial, pix"
+          </p>
+        </div>
+
         <form className="form" onSubmit={handleSubmit}>
           <div className="field">
             <label>Tipo</label>
@@ -313,7 +514,6 @@ export default function TransacoesPage() {
             </div>
           </div>
 
-          {/* 📅 DATA DA TRANSAÇÃO */}
           <div className="field">
             <label>Data da transação</label>
             <input
@@ -393,7 +593,6 @@ export default function TransacoesPage() {
             </div>
           )}
 
-          {/* 💳 PARCELAMENTO – só aparece se for despesa no crédito */}
           {isDespesa && formaPagamento === "credito" && (
             <>
               <div className="field checkbox-field">
@@ -453,7 +652,6 @@ export default function TransacoesPage() {
         </form>
       </div>
 
-      {/* 🧱 MODAL: LIMITE ESTOURADO NO CARTÃO */}
       {mostrarConfirmCredito && pendenteCredito && (
         <div className="modal-overlay">
           <div className="modal-card">
@@ -500,6 +698,13 @@ export default function TransacoesPage() {
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
