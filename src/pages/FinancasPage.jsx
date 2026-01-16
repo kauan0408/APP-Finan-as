@@ -32,6 +32,20 @@ function calcularProximoPagamento(diaPagamento, refMes, refAno) {
   return { data: proximo, diasRestantes: diffDias };
 }
 
+// NOVO: pega o valor do gasto fixo no mês selecionado.
+// Se não tiver valor naquele mês, herda o valor mais recente anterior.
+function getValorFixo(valoresPorMes = {}, chaveMes) {
+  if (valoresPorMes && valoresPorMes[chaveMes] != null) {
+    return Number(valoresPorMes[chaveMes]);
+  }
+  const meses = Object.keys(valoresPorMes || {}).sort(); // "YYYY-MM" ordena certo
+  let ultimo = null;
+  for (const m of meses) {
+    if (m <= chaveMes) ultimo = m;
+  }
+  return ultimo ? Number(valoresPorMes[ultimo]) : 0;
+}
+
 export default function FinancasPage() {
   const {
     transacoes,
@@ -56,7 +70,20 @@ export default function FinancasPage() {
     };
 
     const semanas = [0, 0, 0, 0];
-    const gastosFixos = [];
+
+    // chave do mês selecionado: "2026-01", etc.
+    const chaveMes = `${ano}-${String(mes + 1).padStart(2, "0")}`;
+
+    // NOVO: gastos fixos vindo do perfil (não transações)
+    const gastosFixosPerfil = (Array.isArray(profile.gastosFixos) ? profile.gastosFixos : [])
+      .filter((g) => g.ativo !== false)
+      .filter((g) => (g.nome || "").toLowerCase() !== "educacao" && (g.categoria || "").toLowerCase() !== "educacao")
+      .map((g) => ({
+        id: g.id,
+        descricao: g.nome,
+        valor: getValorFixo(g.valoresPorMes || {}, chaveMes),
+      }))
+      .filter((g) => Number(g.valor) > 0);
 
     transacoes.forEach((t) => {
       const dt = new Date(t.dataHora);
@@ -81,7 +108,8 @@ export default function FinancasPage() {
           const semanaIndex = Math.min(3, Math.floor((dia - 1) / 7));
           semanas[semanaIndex] += valor;
 
-          if (t.fixo) gastosFixos.push(t);
+          // REMOVIDO: não usar t.fixo porque fixos agora vêm do perfil
+          // if (t.fixo) gastosFixos.push(t);
         }
       }
     });
@@ -115,49 +143,38 @@ export default function FinancasPage() {
       semanas,
       maxSemana: Math.max(...semanas, 1),
       topDespesas,
-      gastosFixos,
+      gastosFixos: gastosFixosPerfil, // NOVO: do perfil
     };
-  }, [transacoes, mesReferencia]); // 👈 AQUI ESTAVA O ERRO (antes estava mesRef)
+  }, [transacoes, mesReferencia, profile.gastosFixos]); // inclui gastosFixos do profile
 
-    /* VARIÁVEIS DO PERFIL */
-    // chave do mês atual: "2025-11", "2025-12", etc.
-    const chaveMes = `${mesReferencia.ano}-${String(mesReferencia.mes + 1).padStart(2, "0")}`;
-    const salariosPorMes = profile.salariosPorMes || {};
+  /* VARIÁVEIS DO PERFIL */
+  // chave do mês atual: "2025-11", "2025-12", etc.
+  const chaveMes = `${mesReferencia.ano}-${String(mesReferencia.mes + 1).padStart(
+    2,
+    "0"
+  )}`;
+  const salariosPorMes = profile.salariosPorMes || {};
 
-    const salarioFixo = Number(
-      salariosPorMes[chaveMes] ?? profile.rendaMensal ?? 0
-    );
+  const salarioFixo = Number(salariosPorMes[chaveMes] ?? profile.rendaMensal ?? 0);
 
-    const limiteGastoMensal = Number(profile.limiteGastoMensal || 0);
-    const diaPagamento = profile.diaPagamento || "";
-
+  const limiteGastoMensal = Number(profile.limiteGastoMensal || 0);
+  const diaPagamento = profile.diaPagamento || "";
 
   const proximoPag = diaPagamento
-    ? calcularProximoPagamento(
-        diaPagamento,
-        mesReferencia.mes,
-        mesReferencia.ano
-      )
+    ? calcularProximoPagamento(diaPagamento, mesReferencia.mes, mesReferencia.ano)
     : null;
 
   // quanto sobrou/faltou só considerando salário - despesas
-  const resultadoSalario =
-    salarioFixo > 0 ? salarioFixo - resumo.despesas : null;
+  const resultadoSalario = salarioFixo > 0 ? salarioFixo - resumo.despesas : null;
 
-  // 👉 NOVO: saldo exibido começa do salário
-  // se tiver salário definido: salário + outras receitas - despesas
-  // se não tiver salário: continua sendo só receitas - despesas
+  // saldo exibido começa do salário
   const saldoComSalario =
-    salarioFixo > 0
-      ? salarioFixo + resumo.receitas - resumo.despesas
-      : resumo.saldo;
+    salarioFixo > 0 ? salarioFixo + resumo.receitas - resumo.despesas : resumo.saldo;
 
   const pizzaStyle = {
     backgroundImage: `conic-gradient(
       #8FA3FF 0 ${resumo.pEssencial}%,
-      #6D83F2 ${resumo.pEssencial}% ${
-        resumo.pEssencial + resumo.pBesteira
-      }%,
+      #6D83F2 ${resumo.pEssencial}% ${resumo.pEssencial + resumo.pBesteira}%,
       #4C5ACF ${resumo.pEssencial + resumo.pBesteira}% 100%
     )`,
   };
@@ -199,10 +216,7 @@ export default function FinancasPage() {
             marginTop: 10,
           }}
         >
-          <button
-            className="toggle-btn"
-            onClick={() => mudarMesReferencia(-1)}
-          >
+          <button className="toggle-btn" onClick={() => mudarMesReferencia(-1)}>
             ◀ Mês anterior
           </button>
 
@@ -210,22 +224,56 @@ export default function FinancasPage() {
             ● Atual
           </button>
 
-          <button
-            className="toggle-btn"
-            onClick={() => mudarMesReferencia(1)}
-          >
+          <button className="toggle-btn" onClick={() => mudarMesReferencia(1)}>
             Próximo mês ▶
           </button>
         </div>
       </div>
 
-      {/* BLOCO PRINCIPAL JUNTO ( DIA ) */}
-      <div className="pill">
-        {diaPagamento ? (
-          <span>Dia {diaPagamento}</span>
-        ) : (
-          <span>Sem dia definido</span>
-        )}
+      {/* BLOCO PRINCIPAL JUNTO (SALÁRIO + DIA + RESULTADO) */}
+      <div className="card resumo-card">
+        <div className="resumo-top">
+          <div>
+            <p className="resumo-label">Salário fixo</p>
+            <p className="resumo-value">
+              {salarioFixo ? formatCurrency(salarioFixo) : "Defina na aba Perfil"}
+            </p>
+          </div>
+
+          <div className="pill">
+            {diaPagamento ? (
+              <>
+                <span>Dia {diaPagamento}</span>
+                {proximoPag && (
+                  <span className="pill-sub">
+                    Próx. em {proximoPag.diasRestantes} dia(s)
+                  </span>
+                )}
+              </>
+            ) : (
+              <span>Sem dia definido</span>
+            )}
+          </div>
+        </div>
+
+        {/* Resultado salário */}
+        <div className="resumo-footer">
+          {resultadoSalario === null ? (
+            <p className="muted small">
+              Defina sua renda mensal fixa na aba Perfil para calcular sobras.
+            </p>
+          ) : (
+            <span
+              className={
+                "badge badge-pill " +
+                (resultadoSalario >= 0 ? "badge-positive" : "badge-negative")
+              }
+            >
+              {resultadoSalario >= 0 ? "Sobrou" : "Faltou"}{" "}
+              {formatCurrency(Math.abs(resultadoSalario))}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* RECEITAS / DESPESAS / SALDO / CRÉDITO */}
@@ -233,24 +281,19 @@ export default function FinancasPage() {
         <div className="resumo-grid">
           <div>
             <p className="resumo-label">Receitas do mês</p>
-            <p className="resumo-number positive">
-              {formatCurrency(resumo.receitas)}
-            </p>
+            <p className="resumo-number positive">{formatCurrency(resumo.receitas)}</p>
           </div>
 
           <div>
             <p className="resumo-label">Despesas do mês</p>
-            <p className="resumo-number negative">
-              {formatCurrency(resumo.despesas)}
-            </p>
+            <p className="resumo-number negative">{formatCurrency(resumo.despesas)}</p>
           </div>
 
           <div>
             <p className="resumo-label">Saldo</p>
             <p
               className={
-                "resumo-number " +
-                (saldoComSalario >= 0 ? "positive" : "negative")
+                "resumo-number " + (saldoComSalario >= 0 ? "positive" : "negative")
               }
             >
               {formatCurrency(saldoComSalario)}
@@ -271,18 +314,11 @@ export default function FinancasPage() {
         <h3>Limite de gasto mensal</h3>
         {limiteGastoMensal ? (
           <>
-            <p className="muted small">
-              Limite: {formatCurrency(limiteGastoMensal)}
-            </p>
+            <p className="muted small">Limite: {formatCurrency(limiteGastoMensal)}</p>
             <div className="progress-bar">
-              <div
-                className="progress-fill"
-                style={{ width: `${percLimite}%` }}
-              />
+              <div className="progress-fill" style={{ width: `${percLimite}%` }} />
             </div>
-            <span className="progress-label">
-              {percLimite.toFixed(0)}% utilizado
-            </span>
+            <span className="progress-label">{percLimite.toFixed(0)}% utilizado</span>
           </>
         ) : (
           <p className="muted small">Defina seu limite na aba Perfil.</p>
@@ -353,10 +389,7 @@ export default function FinancasPage() {
               const height = (v / resumo.maxSemana) * 100;
               return (
                 <div className="bar-column" key={i}>
-                  <div
-                    className="bar"
-                    style={{ height: `${height || 2}%` }}
-                  />
+                  <div className="bar" style={{ height: `${height || 2}%` }} />
                   <span className="bar-label">Sem {i + 1}</span>
                 </div>
               );
@@ -367,4 +400,3 @@ export default function FinancasPage() {
     </div>
   );
 }
-
