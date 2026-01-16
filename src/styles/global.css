@@ -1112,3 +1112,31 @@ select:focus {
     font-size: 1.4rem;
   }
 }
+
+/* ============================
+   PATCH: garantir que as páginas rolem e não fiquem cortadas
+   (não remove nada do seu CSS, só corrige o necessário)
+============================ */
+
+/* 1) Se o app-root estiver com overflow:hidden (como está),
+      isso pode cortar o conteúdo grande. Aqui liberamos o scroll vertical. */
+.app-root {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* 2) Garantir que a área principal possa rolar se estiver presa em algum container */
+.app-overlay {
+  min-height: 100vh;
+}
+
+/* 3) Se o menu inferior estiver cobrindo o final da página, aumenta a folga */
+.app-main {
+  padding-bottom: 110px; /* era 72px; isso evita esconder o fim da página */
+}
+
+/* 4) Só pra garantir que listas/cards grandes não “estourem” e sumam */
+.page,
+.card {
+  max-width: 100%;
+}
