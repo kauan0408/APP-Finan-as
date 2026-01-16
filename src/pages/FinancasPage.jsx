@@ -46,6 +46,14 @@ function getValorFixo(valoresPorMes = {}, chaveMes) {
   return ultimo ? Number(valoresPorMes[ultimo]) : 0;
 }
 
+// ✅ normaliza nomes p/ unificar (Uber, uber, " Uber  " -> "uber")
+function normalizarNome(descricao) {
+  return String(descricao || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 export default function FinancasPage() {
   const {
     transacoes,
@@ -139,17 +147,46 @@ export default function FinancasPage() {
 
     const saldo = receitas - despesas;
 
-    const topDespesas = transacoes
-      .filter((t) => {
-        const dt = new Date(t.dataHora);
-        return (
-          t.tipo === "despesa" &&
-          dt.getMonth() === mes &&
-          dt.getFullYear() === ano
-        );
-      })
+    // ✅ TOP 5 gastos UNIFICADOS por nome (no mês selecionado)
+    const mapa = new Map();
+
+    transacoes.forEach((t) => {
+      const dt = new Date(t.dataHora);
+      if (
+        t.tipo === "despesa" &&
+        dt.getMonth() === mes &&
+        dt.getFullYear() === ano
+      ) {
+        const key = normalizarNome(t.descricao || "Sem descrição");
+        const atual = mapa.get(key) || {
+          descricao: t.descricao || "Sem descrição",
+          valor: 0,
+          count: 0,
+        };
+        atual.valor += Number(t.valor || 0);
+        atual.count += 1;
+
+        // mantém uma descrição “bonita”
+        if (
+          (!atual.descricao || atual.descricao === "Sem descrição") &&
+          t.descricao
+        ) {
+          atual.descricao = t.descricao;
+        }
+
+        mapa.set(key, atual);
+      }
+    });
+
+    const topDespesas = Array.from(mapa.values())
       .sort((a, b) => Number(b.valor) - Number(a.valor))
-      .slice(0, 5);
+      .slice(0, 5)
+      .map((x, idx) => ({
+        id: `top-${idx}`,
+        descricao: x.descricao,
+        valor: x.valor,
+        count: x.count,
+      }));
 
     const totalCat = categorias.essencial + categorias.lazer || 1;
 
@@ -165,7 +202,7 @@ export default function FinancasPage() {
       maxSemana: Math.max(...semanas, 1),
       topDespesas,
       gastosFixos: gastosFixosPerfil,
-      totalGastosFixos, // DEBUG: pra você ver na tela se somou
+      totalGastosFixos, // DEBUG
       despesasTransacoes, // DEBUG
     };
   }, [transacoes, mesReferencia, profile?.gastosFixos]);
@@ -230,12 +267,6 @@ export default function FinancasPage() {
   return (
     <div className="page">
       <h2 className="page-title">Visão geral do mês</h2>
-
-      {/* MARCADOR PRA CONFIRMAR QUE ESTE ARQUIVO ESTÁ RODANDO */}
-      <p style={{ color: "yellow", fontSize: 12, marginTop: -6 }}>
-        DEBUG FINANCAS V3 — Fixos: {formatCurrency(resumo.totalGastosFixos)} —
-        Transações: {formatCurrency(resumo.despesasTransacoes)}
-      </p>
 
       {/* NAVEGAÇÃO DO MÊS */}
       <div className="card" style={{ textAlign: "center", marginBottom: 12 }}>
@@ -314,35 +345,24 @@ export default function FinancasPage() {
         <div className="resumo-grid">
           <div>
             <p className="resumo-label">Receitas do mês</p>
-            <p className="resumo-number positive">
-              {formatCurrency(resumo.receitas)}
-            </p>
+            <p className="resumo-number positive">{formatCurrency(resumo.receitas)}</p>
           </div>
 
           <div>
             <p className="resumo-label">Despesas do mês</p>
-            <p className="resumo-number negative">
-              {formatCurrency(resumo.despesas)}
-            </p>
+            <p className="resumo-number negative">{formatCurrency(resumo.despesas)}</p>
           </div>
 
           <div>
             <p className="resumo-label">Saldo</p>
-            <p
-              className={
-                "resumo-number " +
-                (saldoComSalario >= 0 ? "positive" : "negative")
-              }
-            >
+            <p className={"resumo-number " + (saldoComSalario >= 0 ? "positive" : "negative")}>
               {formatCurrency(saldoComSalario)}
             </p>
           </div>
 
           <div>
             <p className="resumo-label">Crédito usado</p>
-            <p className="resumo-number negative">
-              {formatCurrency(resumo.gastosCartao)}
-            </p>
+            <p className="resumo-number negative">{formatCurrency(resumo.gastosCartao)}</p>
           </div>
         </div>
       </div>
@@ -352,9 +372,7 @@ export default function FinancasPage() {
         <h3>Limite de gasto mensal</h3>
         {limiteGastoMensal ? (
           <>
-            <p className="muted small">
-              Limite: {formatCurrency(limiteGastoMensal)}
-            </p>
+            <p className="muted small">Limite: {formatCurrency(limiteGastoMensal)}</p>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${percLimite}%` }} />
             </div>
@@ -391,7 +409,10 @@ export default function FinancasPage() {
           <ul className="list">
             {resumo.topDespesas.map((t) => (
               <li key={t.id} className="list-item">
-                <span>{t.descricao}</span>
+                <span>
+                  {t.descricao}
+                  {t.count > 1 ? <span className="muted small"> · {t.count}x</span> : null}
+                </span>
                 <span>{formatCurrency(t.valor)}</span>
               </li>
             ))}
