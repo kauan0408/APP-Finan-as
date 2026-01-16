@@ -390,7 +390,6 @@ export default function TransacoesPage() {
     const palavrasChave = [
       "categoria",
       "essencial",
-      "besteira",
       "lazer",
       "pix",
       "débito",
@@ -424,8 +423,6 @@ export default function TransacoesPage() {
     // Extrai categoria
     if (textoLower.includes("essencial")) {
       setCategoria("Essencial");
-    } else if (textoLower.includes("besteira")) {
-      setCategoria("Besteira");
     } else if (textoLower.includes("lazer")) {
       setCategoria("Lazer");
     }
@@ -581,7 +578,6 @@ export default function TransacoesPage() {
                 onChange={(e) => setCategoria(e.target.value)}
               >
                 <option value="Essencial">Essencial</option>
-                <option value="Besteira">Besteira</option>
                 <option value="Lazer">Lazer</option>
               </select>
             </div>
