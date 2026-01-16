@@ -350,7 +350,6 @@ export default function PerfilPage() {
           <label>Categoria</label>
           <select value={gfCategoria} onChange={(e) => setGfCategoria(e.target.value)}>
             <option value="essencial">Essencial</option>
-            <option value="besteira">Besteira</option>
             <option value="lazer">Lazer</option>
             {/* Educação propositalmente NÃO está aqui */}
           </select>
