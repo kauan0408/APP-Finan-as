@@ -16,12 +16,8 @@ function formatCurrency(value) {
 }
 
 export default function TransacoesPage() {
-  const {
-    adicionarTransacao,
-    cartoes,
-    mesReferencia,
-    transacoes,
-  } = useFinance();
+  const { adicionarTransacao, cartoes, mesReferencia, transacoes } =
+    useFinance();
 
   const [tipo, setTipo] = useState("despesa");
   const [valor, setValor] = useState("");
@@ -29,7 +25,7 @@ export default function TransacoesPage() {
   const [categoria, setCategoria] = useState("Essencial");
   const [formaPagamento, setFormaPagamento] = useState("dinheiro");
   const [cartaoId, setCartaoId] = useState("");
-  const [fixo, setFixo] = useState(false);
+  const [fixo, setFixo] = useState(false); // (mantido para não quebrar nada, mas não será usado/salvo aqui)
   const [mensagem, setMensagem] = useState("");
 
   const [parcelado, setParcelado] = useState(false);
@@ -67,7 +63,7 @@ export default function TransacoesPage() {
       categoriaForm,
       formaForm,
       cartaoIdForm,
-      fixoForm,
+      // fixoForm, // não usar gasto fixo aqui
       parceladoForm,
       numeroParcelasForm,
       dataBaseISO,
@@ -128,8 +124,8 @@ export default function TransacoesPage() {
         categoria: isDespesaLocal ? categoriaForm : null,
         formaPagamento: formaForm,
         cartaoId: formaForm === "credito" ? cartaoIdForm || null : null,
-        fixo: isDespesaLocal ? fixoForm : false,
-        dataHora: baseDate.toISOString(),
+        fixo: false, // ✅ não salva gasto fixo aqui
+        dataHora: baseDate.toISOString(), // ✅ salva data+hora real
         parcelaAtual: null,
         parcelaTotal: null,
         groupId: null,
@@ -160,9 +156,21 @@ export default function TransacoesPage() {
       return;
     }
 
+    // ✅ AQUI estava o problema do 12:00 fixo.
+    // Agora: pega o dia escolhido, mas usa a HORA REAL do momento.
     let baseDate;
     if (dataTransacao) {
-      baseDate = new Date(dataTransacao + "T12:00:00");
+      const agora = new Date();
+      const [y, m, d] = dataTransacao.split("-").map(Number);
+      baseDate = new Date(
+        y,
+        (m || 1) - 1,
+        d || 1,
+        agora.getHours(),
+        agora.getMinutes(),
+        agora.getSeconds(),
+        agora.getMilliseconds()
+      );
     } else {
       baseDate = new Date();
     }
@@ -180,10 +188,7 @@ export default function TransacoesPage() {
 
         transacoes.forEach((t) => {
           if (t.cartaoId === cartaoId) {
-            if (
-              t.tipo === "despesa" &&
-              t.formaPagamento === "credito"
-            ) {
+            if (t.tipo === "despesa" && t.formaPagamento === "credito") {
               totalCompras += Number(t.valor || 0);
             }
             if (t.tipo === "pagamentoCartao") {
@@ -206,7 +211,7 @@ export default function TransacoesPage() {
               categoriaForm: categoria,
               formaForm: formaPagamento,
               cartaoIdForm: cartaoId,
-              fixoForm: fixo,
+              fixoForm: false, // ✅ não usa gasto fixo aqui
               parceladoForm: parcelado,
               numeroParcelasForm: numeroParcelas,
               dataBaseISO: baseDate.toISOString(),
@@ -229,7 +234,7 @@ export default function TransacoesPage() {
       categoriaForm: categoria,
       formaForm: formaPagamento,
       cartaoIdForm: cartaoId,
-      fixoForm: fixo,
+      fixoForm: false, // ✅ não usa gasto fixo aqui
       parceladoForm: parcelado,
       numeroParcelasForm: numeroParcelas,
       dataBaseISO: baseDate.toISOString(),
@@ -280,7 +285,9 @@ export default function TransacoesPage() {
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
         await processarAudio(audioBlob);
         stream.getTracks().forEach((track) => track.stop());
       };
@@ -312,7 +319,7 @@ export default function TransacoesPage() {
 
         // Chama a API de transcrição (Web Speech API ou serviço externo)
         const texto = await transcreverAudio(base64Audio);
-        
+
         if (texto) {
           // Extrai informações do texto transcrito
           extrairDadosDoTexto(texto);
@@ -320,7 +327,7 @@ export default function TransacoesPage() {
         } else {
           mostrarMensagem("❌ Não foi possível processar o áudio");
         }
-        
+
         setProcessandoAudio(false);
       };
     } catch (error) {
@@ -333,10 +340,10 @@ export default function TransacoesPage() {
   const transcreverAudio = async (base64Audio) => {
     // Opção 1: Usar Web Speech API (funciona offline, mas menos preciso)
     // Opção 2: Usar serviço externo como OpenAI Whisper, Google Speech-to-Text, etc.
-    
+
     // Exemplo simplificado - você precisará implementar a chamada real à API
     // Por enquanto, retorna um exemplo para demonstração
-    
+
     try {
       // Aqui você faria a chamada para sua API de transcrição
       // Exemplo com fetch para um endpoint hipotético:
@@ -349,7 +356,7 @@ export default function TransacoesPage() {
       const data = await response.json();
       return data.text;
       */
-      
+
       // Por enquanto, simula um retorno
       return "despesa de 50 reais no mercado categoria essencial pix";
     } catch (error) {
@@ -360,9 +367,13 @@ export default function TransacoesPage() {
 
   const extrairDadosDoTexto = (texto) => {
     const textoLower = texto.toLowerCase();
-    
+
     // Extrai tipo (despesa ou receita)
-    if (textoLower.includes("receita") || textoLower.includes("ganho") || textoLower.includes("salário")) {
+    if (
+      textoLower.includes("receita") ||
+      textoLower.includes("ganho") ||
+      textoLower.includes("salário")
+    ) {
       setTipo("receita");
     } else {
       setTipo("despesa");
@@ -376,24 +387,36 @@ export default function TransacoesPage() {
     }
 
     // Extrai descrição (palavras entre o valor e a categoria/forma de pagamento)
-    const palavrasChave = ["categoria", "essencial", "besteira", "lazer", "pix", "débito", "crédito", "dinheiro"];
+    const palavrasChave = [
+      "categoria",
+      "essencial",
+      "besteira",
+      "lazer",
+      "pix",
+      "débito",
+      "crédito",
+      "dinheiro",
+    ];
     let descricaoExtraida = "";
     const palavras = texto.split(" ");
     let capturando = false;
-    
+
     for (let palavra of palavras) {
       if (matchValor && palavra.includes(matchValor[1])) {
         capturando = true;
         continue;
       }
-      if (capturando && !palavrasChave.some(p => palavra.toLowerCase().includes(p))) {
+      if (
+        capturando &&
+        !palavrasChave.some((p) => palavra.toLowerCase().includes(p))
+      ) {
         descricaoExtraida += palavra + " ";
       }
-      if (palavrasChave.some(p => palavra.toLowerCase().includes(p))) {
+      if (palavrasChave.some((p) => palavra.toLowerCase().includes(p))) {
         break;
       }
     }
-    
+
     if (descricaoExtraida.trim()) {
       setDescricao(descricaoExtraida.trim());
     }
@@ -412,14 +435,21 @@ export default function TransacoesPage() {
       setFormaPagamento("pix");
     } else if (textoLower.includes("débito") || textoLower.includes("debito")) {
       setFormaPagamento("debito");
-    } else if (textoLower.includes("crédito") || textoLower.includes("credito")) {
+    } else if (
+      textoLower.includes("crédito") ||
+      textoLower.includes("credito")
+    ) {
       setFormaPagamento("credito");
     } else if (textoLower.includes("dinheiro")) {
       setFormaPagamento("dinheiro");
     }
 
-    // Extrai se é fixo
-    if (textoLower.includes("fixo") || textoLower.includes("mensal") || textoLower.includes("todo mês")) {
+    // Extrai se é fixo (mantido, mas não vai salvar como fixo nesta página)
+    if (
+      textoLower.includes("fixo") ||
+      textoLower.includes("mensal") ||
+      textoLower.includes("todo mês")
+    ) {
       setFixo(true);
     }
 
@@ -456,7 +486,7 @@ export default function TransacoesPage() {
               🎤 Gravar transação por áudio
             </button>
           )}
-          
+
           {gravando && (
             <button
               type="button"
@@ -475,13 +505,11 @@ export default function TransacoesPage() {
               ⏹️ Parar gravação
             </button>
           )}
-          
+
           {processandoAudio && (
-            <div style={{ color: "#6b7280" }}>
-              ⏳ Processando áudio...
-            </div>
+            <div style={{ color: "#6b7280" }}>⏳ Processando áudio...</div>
           )}
-          
+
           <p className="muted small" style={{ marginTop: 8 }}>
             Exemplo: "Despesa de 50 reais no mercado, categoria essencial, pix"
           </p>
@@ -494,8 +522,7 @@ export default function TransacoesPage() {
               <button
                 type="button"
                 className={
-                  "toggle-btn " +
-                  (tipo === "despesa" ? "toggle-active" : "")
+                  "toggle-btn " + (tipo === "despesa" ? "toggle-active" : "")
                 }
                 onClick={() => onChangeTipo("despesa")}
               >
@@ -504,8 +531,7 @@ export default function TransacoesPage() {
               <button
                 type="button"
                 className={
-                  "toggle-btn " +
-                  (tipo === "receita" ? "toggle-active" : "")
+                  "toggle-btn " + (tipo === "receita" ? "toggle-active" : "")
                 }
                 onClick={() => onChangeTipo("receita")}
               >
@@ -543,11 +569,7 @@ export default function TransacoesPage() {
               type="text"
               value={descricao}
               onChange={(e) => setDescricao(e.target.value)}
-              placeholder={
-                isDespesa
-                  ? "Ex.: Aluguel, mercado..."
-                  : "Ex.: salário, extra"
-              }
+              placeholder={isDespesa ? "Ex.: Aluguel, mercado..." : "Ex.: salário, extra"}
             />
           </div>
 
@@ -606,8 +628,8 @@ export default function TransacoesPage() {
                 </label>
                 <p className="muted small">
                   Se marcado, o app vai criar{" "}
-                  <strong>1 transação por parcela</strong> em meses
-                  diferentes (1/3, 2/3, 3/3...).
+                  <strong>1 transação por parcela</strong> em meses diferentes
+                  (1/3, 2/3, 3/3...).
                 </p>
               </div>
 
@@ -626,23 +648,7 @@ export default function TransacoesPage() {
             </>
           )}
 
-          {isDespesa && (
-            <div className="field checkbox-field">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={fixo}
-                  onChange={(e) => setFixo(e.target.checked)}
-                  disabled={formaPagamento === "credito" && parcelado}
-                />{" "}
-                É gasto fixo (conta mensal)?
-              </label>
-              <p className="muted small">
-                Marque para contas que se repetem todo mês, como aluguel,
-                água, luz, internet, etc.
-              </p>
-            </div>
-          )}
+          {/* ✅ BOTÃO DE GASTO FIXO REMOVIDO (checkbox "É gasto fixo") */}
 
           <button className="primary-btn" style={{ marginTop: 10 }}>
             Salvar transação
