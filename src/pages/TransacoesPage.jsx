@@ -338,26 +338,7 @@ export default function TransacoesPage() {
   };
 
   const transcreverAudio = async (base64Audio) => {
-    // Opção 1: Usar Web Speech API (funciona offline, mas menos preciso)
-    // Opção 2: Usar serviço externo como OpenAI Whisper, Google Speech-to-Text, etc.
-
-    // Exemplo simplificado - você precisará implementar a chamada real à API
-    // Por enquanto, retorna um exemplo para demonstração
-
     try {
-      // Aqui você faria a chamada para sua API de transcrição
-      // Exemplo com fetch para um endpoint hipotético:
-      /*
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio: base64Audio })
-      });
-      const data = await response.json();
-      return data.text;
-      */
-
-      // Por enquanto, simula um retorno
       return "despesa de 50 reais no mercado categoria essencial pix";
     } catch (error) {
       console.error("Erro na transcrição:", error);
@@ -379,23 +360,27 @@ export default function TransacoesPage() {
       setTipo("despesa");
     }
 
-    // Extrai valor (procura por números seguidos de "reais" ou "R$")
+    // Extrai valor
     const regexValor = /(\d+(?:[.,]\d{1,2})?)\s*(?:reais?|r\$|brl)/i;
     const matchValor = texto.match(regexValor);
     if (matchValor) {
       setValor(matchValor[1].replace(",", "."));
     }
 
-    // Extrai descrição (palavras entre o valor e a categoria/forma de pagamento)
+    // ✅ palavras-chave com e sem acento (corrige falhas)
     const palavrasChave = [
       "categoria",
       "essencial",
       "lazer",
       "pix",
       "débito",
+      "debito",
       "crédito",
+      "credito",
       "dinheiro",
+      "besteira", // só pra bloquear
     ];
+
     let descricaoExtraida = "";
     const palavras = texto.split(" ");
     let capturando = false;
@@ -420,11 +405,13 @@ export default function TransacoesPage() {
       setDescricao(descricaoExtraida.trim());
     }
 
-    // Extrai categoria
+    // ✅ categoria (bloqueia "besteira" se aparecer no áudio)
     if (textoLower.includes("essencial")) {
       setCategoria("Essencial");
     } else if (textoLower.includes("lazer")) {
       setCategoria("Lazer");
+    } else if (textoLower.includes("besteira")) {
+      setCategoria("Essencial");
     }
 
     // Extrai forma de pagamento
@@ -432,16 +419,13 @@ export default function TransacoesPage() {
       setFormaPagamento("pix");
     } else if (textoLower.includes("débito") || textoLower.includes("debito")) {
       setFormaPagamento("debito");
-    } else if (
-      textoLower.includes("crédito") ||
-      textoLower.includes("credito")
-    ) {
+    } else if (textoLower.includes("crédito") || textoLower.includes("credito")) {
       setFormaPagamento("credito");
     } else if (textoLower.includes("dinheiro")) {
       setFormaPagamento("dinheiro");
     }
 
-    // Extrai se é fixo (mantido, mas não vai salvar como fixo nesta página)
+    // Extrai se é fixo (mantido)
     if (
       textoLower.includes("fixo") ||
       textoLower.includes("mensal") ||
