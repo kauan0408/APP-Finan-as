@@ -9,17 +9,39 @@ function formatCurrency(value) {
   });
 }
 
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
+// ✅ parse robusto: aceita ISO string, timestamp number, timestamp string ("1700000000000")
+function parseDateValue(value) {
+  if (value == null) return new Date(NaN);
+
+  if (typeof value === "number") return new Date(value);
+
+  const s = String(value).trim();
+  if (/^\d+$/.test(s)) return new Date(Number(s));
+
+  return new Date(s);
+}
+
+function formatDate(dateValue) {
+  const d = parseDateValue(dateValue);
+  if (isNaN(d.getTime())) return "Data inválida";
   return d.toLocaleDateString("pt-BR");
 }
 
-function formatTime(dateStr) {
-  const d = new Date(dateStr);
+function formatTime(dateValue) {
+  const d = parseDateValue(dateValue);
+  if (isNaN(d.getTime())) return "--:--";
   return d.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// ✅ normaliza nomes p/ juntar iguais
+function normalizarDescricao(desc) {
+  return String(desc || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 export default function HistoricoPage() {
@@ -58,7 +80,7 @@ export default function HistoricoPage() {
   }, [cartoes]);
 
   const resultado = useMemo(() => {
-    // 1) LISTA BASE = tudo que já foi lançado, com filtros (tipo, categoria, forma, cartão, texto, datas)
+    // 1) LISTA BASE = tudo que já foi lançado, com filtros
     let listaBase = [...transacoes];
 
     if (tipoFilter !== "todos") {
@@ -67,8 +89,7 @@ export default function HistoricoPage() {
     if (categoriaFilter !== "todas") {
       listaBase = listaBase.filter(
         (t) =>
-          (t.categoria || "").toLowerCase() ===
-          categoriaFilter.toLowerCase()
+          (t.categoria || "").toLowerCase() === categoriaFilter.toLowerCase()
       );
     }
     if (formaFilter !== "todas") {
@@ -83,13 +104,15 @@ export default function HistoricoPage() {
         (t.descricao || "").toLowerCase().includes(txt)
       );
     }
+
+    // ✅ filtros por data usando parseDateValue (ISO e timestamp)
     if (dataInicio) {
       const di = new Date(dataInicio + "T00:00:00");
-      listaBase = listaBase.filter((t) => new Date(t.dataHora) >= di);
+      listaBase = listaBase.filter((t) => parseDateValue(t.dataHora) >= di);
     }
     if (dataFim) {
       const df = new Date(dataFim + "T23:59:59");
-      listaBase = listaBase.filter((t) => new Date(t.dataHora) <= df);
+      listaBase = listaBase.filter((t) => parseDateValue(t.dataHora) <= df);
     }
 
     // 2) LISTA PARA O RESUMO (lá de cima)
@@ -100,7 +123,7 @@ export default function HistoricoPage() {
     if (!dataInicio && !dataFim && mesReferencia) {
       const { mes, ano } = mesReferencia;
       listaResumo = listaBase.filter((t) => {
-        const dt = new Date(t.dataHora);
+        const dt = parseDateValue(t.dataHora);
         return dt.getMonth() === mes && dt.getFullYear() === ano;
       });
     }
@@ -114,16 +137,48 @@ export default function HistoricoPage() {
       if (t.tipo === "receita") totalReceitasResumo += valor;
     });
 
-    // 3) AGRUPAMENTO POR DIA PARA A LISTA DE BAIXO (usa TUDO da listaBase)
+    // 3) AGRUPAMENTO POR DIA
     const porDia = {};
-    listaBase.forEach((t) => {
-      const d = formatDate(t.dataHora);
-      if (!porDia[d]) porDia[d] = { itens: [], totalDia: 0 };
 
-      porDia[d].itens.push(t);
+    listaBase.forEach((t) => {
+      const diaStr = formatDate(t.dataHora);
+      if (!porDia[diaStr]) porDia[diaStr] = { itens: [], totalDia: 0 };
+
+      porDia[diaStr].itens.push(t);
 
       const valor = Number(t.valor || 0);
-      porDia[d].totalDia += t.tipo === "despesa" ? -valor : valor;
+      porDia[diaStr].totalDia += t.tipo === "despesa" ? -valor : valor;
+    });
+
+    // ✅ unifica nomes iguais NO MESMO DIA (mantém tipo separado)
+    Object.keys(porDia).forEach((diaStr) => {
+      const itens = porDia[diaStr].itens;
+
+      const map = new Map();
+
+      itens.forEach((t) => {
+        const key = `${t.tipo}::${normalizarDescricao(t.descricao || "Sem descrição")}`;
+
+        const atual = map.get(key);
+        if (!atual) {
+          map.set(key, {
+            ...t,
+            _agregado: true,
+            _count: 1,
+            _ids: [t.id],
+            valor: Number(t.valor || 0),
+          });
+        } else {
+          atual.valor += Number(t.valor || 0);
+          atual._count += 1;
+          atual._ids.push(t.id);
+          // mantém dataHora do primeiro item (não mexe)
+        }
+      });
+
+      porDia[diaStr].itens = Array.from(map.values()).sort(
+        (a, b) => parseDateValue(b.dataHora) - parseDateValue(a.dataHora)
+      );
     });
 
     const diasOrdenados = Object.keys(porDia).sort((a, b) => {
@@ -137,8 +192,8 @@ export default function HistoricoPage() {
       diasOrdenados,
       totalDespesasResumo,
       totalReceitasResumo,
-      totalTransacoesResumo: listaResumo.length, // para o card de cima
-      totalTransacoesLista: listaBase.length, // para saber se tem algo na lista de baixo
+      totalTransacoesResumo: listaResumo.length,
+      totalTransacoesLista: listaBase.length,
     };
   }, [
     transacoes,
@@ -180,6 +235,12 @@ export default function HistoricoPage() {
 
   // 🔧 abrir modal de edição
   const abrirEdicao = (t) => {
+    // se for agregado, edita o primeiro item real
+    if (t._agregado && Array.isArray(t._ids) && t._ids.length > 0) {
+      const primeiro = transacoes.find((x) => x.id === t._ids[0]);
+      if (primeiro) t = primeiro;
+    }
+
     setEditando(t);
     setDescricaoEdit(t.descricao || "");
 
@@ -221,7 +282,9 @@ export default function HistoricoPage() {
     if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
       const parcelas = transacoes
         .filter((p) => p.groupId === t.groupId)
-        .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
+        .sort(
+          (a, b) => parseDateValue(a.dataHora) - parseDateValue(b.dataHora)
+        );
 
       const totalParcelas = parcelas.length || t.parcelaTotal;
       const valorParcela = v / totalParcelas;
@@ -242,7 +305,7 @@ export default function HistoricoPage() {
       return;
     }
 
-    // 🧾 TRANSAÇÃO NORMAL (sem grupo)
+    // 🧾 TRANSAÇÃO NORMAL
     const dadosAtualizados = {
       tipo: tipoEdit,
       valor: v,
@@ -261,13 +324,20 @@ export default function HistoricoPage() {
   const confirmarApagar = () => {
     if (!confirmandoExclusao) return;
 
-    const t = confirmandoExclusao;
+    let t = confirmandoExclusao;
 
-    // 🔥 Se for parcela com groupId → apaga TODAS as parcelas da compra
+    // se for agregado, apaga todos os ids agregados
+    if (t._agregado && Array.isArray(t._ids) && t._ids.length > 0) {
+      t._ids.forEach((id) => removerTransacao(id));
+      if (editando && t._ids.includes(editando.id)) fecharEdicao();
+      setConfirmandoExclusao(null);
+      return;
+    }
+
+    // Se for parcela com groupId → apaga TODAS as parcelas
     if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
       const grupoId = t.groupId;
       const doGrupo = transacoes.filter((p) => p.groupId === grupoId);
-
       doGrupo.forEach((p) => removerTransacao(p.id));
     } else {
       removerTransacao(t.id);
@@ -292,7 +362,7 @@ export default function HistoricoPage() {
     <div className="page">
       <h2 className="page-title">Histórico</h2>
 
-      {/* Resumo (segue mês da Visão Geral ou período das datas) */}
+      {/* Resumo */}
       <div className="card history-summary">
         <h3>
           Resumo de {nomeMes} / {mesReferencia.ano}
@@ -305,9 +375,7 @@ export default function HistoricoPage() {
           <div className="history-summary-grid">
             <div>
               <p className="history-summary-label">Transações</p>
-              <p className="history-summary-value">
-                {totalTransacoesResumo}
-              </p>
+              <p className="history-summary-value">{totalTransacoesResumo}</p>
             </div>
             <div>
               <p className="history-summary-label">Receitas</p>
@@ -343,27 +411,21 @@ export default function HistoricoPage() {
         <div className="chips-row">
           <button
             type="button"
-            className={
-              "chip " + (tipoFilter === "todos" ? "chip-active" : "")
-            }
+            className={"chip " + (tipoFilter === "todos" ? "chip-active" : "")}
             onClick={() => setTipoFilter("todos")}
           >
             Todos
           </button>
           <button
             type="button"
-            className={
-              "chip " + (tipoFilter === "despesa" ? "chip-active" : "")
-            }
+            className={"chip " + (tipoFilter === "despesa" ? "chip-active" : "")}
             onClick={() => setTipoFilter("despesa")}
           >
             Despesas
           </button>
           <button
             type="button"
-            className={
-              "chip " + (tipoFilter === "receita" ? "chip-active" : "")
-            }
+            className={"chip " + (tipoFilter === "receita" ? "chip-active" : "")}
             onClick={() => setTipoFilter("receita")}
           >
             Receitas
@@ -383,6 +445,7 @@ export default function HistoricoPage() {
               <option value="Lazer">Lazer</option>
             </select>
           </div>
+
           <div className="field">
             <label>Forma de pagamento</label>
             <select
@@ -397,6 +460,7 @@ export default function HistoricoPage() {
               <option value="outros">Outros</option>
             </select>
           </div>
+
           <div className="field">
             <label>Cartão</label>
             <select
@@ -411,6 +475,7 @@ export default function HistoricoPage() {
               ))}
             </select>
           </div>
+
           <div className="field">
             <label>Data início</label>
             <input
@@ -419,6 +484,7 @@ export default function HistoricoPage() {
               onChange={(e) => setDataInicio(e.target.value)}
             />
           </div>
+
           <div className="field">
             <label>Data fim</label>
             <input
@@ -463,9 +529,7 @@ export default function HistoricoPage() {
               <div className="history-day-header">
                 <div>
                   <h3>{dia}</h3>
-                  <p className="muted small">
-                    {bloco.itens.length} transação(ões)
-                  </p>
+                  <p className="muted small">{bloco.itens.length} transação(ões)</p>
                 </div>
                 <div className="align-right">
                   <p className="history-summary-label">Saldo do dia</p>
@@ -483,20 +547,29 @@ export default function HistoricoPage() {
               <ul className="list">
                 {bloco.itens.map((t) => (
                   <li
-                    key={t.id}
+                    key={
+                      t._agregado
+                        ? `ag-${t.tipo}-${normalizarDescricao(t.descricao)}`
+                        : t.id
+                    }
                     className="list-item list-item-history"
                   >
                     <div>
                       <span className="badge">
                         {t.tipo === "despesa" ? "Despesa" : "Receita"}
                       </span>{" "}
-                      <span>{t.descricao || "Sem descrição"}</span>
+                      <span>
+                        {t.descricao || "Sem descrição"}
+                        {t._agregado && t._count > 1 ? (
+                          <span className="muted small"> · {t._count}x</span>
+                        ) : null}
+                      </span>
+
                       <div className="muted small">
                         {(t.formaPagamento || "").toUpperCase()}
                         {t.cartaoId &&
                           ` · ${cartaoNomePorId[t.cartaoId] || "Cartão"}`}
-                        {t.categoria &&
-                          ` · ${(t.categoria || "").toString()}`}
+                        {t.categoria && ` · ${(t.categoria || "").toString()}`}
                       </div>
 
                       {t.parcelaTotal && t.parcelaTotal > 1 && (
@@ -512,20 +585,19 @@ export default function HistoricoPage() {
                         </div>
                       )}
                     </div>
+
                     <div className="align-right">
                       <span
                         className={
                           "number small " +
-                          (t.tipo === "despesa"
-                            ? "negative"
-                            : "positive")
+                          (t.tipo === "despesa" ? "negative" : "positive")
                         }
                       >
                         {formatCurrency(t.valor)}
                       </span>
-                      <div className="muted small">
-                        {formatTime(t.dataHora)}
-                      </div>
+
+                      <div className="muted small">{formatTime(t.dataHora)}</div>
+
                       <div style={{ marginTop: 4, display: "flex", gap: 6 }}>
                         <button
                           type="button"
@@ -683,33 +755,14 @@ export default function HistoricoPage() {
             <p className="muted small">
               {confirmandoExclusao.descricao || "Sem descrição"}
               <br />
-              {confirmandoExclusao.groupId &&
-              confirmandoExclusao.parcelaTotal > 1 ? (
-                <>
-                  Total da compra:{" "}
-                  <strong>
-                    {formatCurrency(
-                      confirmandoExclusao.totalCompra ||
-                        Number(confirmandoExclusao.valor || 0) *
-                          Number(confirmandoExclusao.parcelaTotal || 1)
-                    )}
-                  </strong>{" "}
-                  ({confirmandoExclusao.parcelaTotal}x)
-                </>
-              ) : (
-                <strong>
-                  {formatCurrency(confirmandoExclusao.valor)}
-                </strong>
-              )}
+              <strong>{formatCurrency(confirmandoExclusao.valor)}</strong>
+              {confirmandoExclusao._agregado && confirmandoExclusao._count > 1 ? (
+                <span className="muted small">
+                  {" "}
+                  · apagará {confirmandoExclusao._count} itens
+                </span>
+              ) : null}
             </p>
-
-            {confirmandoExclusao.groupId &&
-              confirmandoExclusao.parcelaTotal > 1 && (
-                <p className="muted small" style={{ marginTop: 6 }}>
-                  Ao apagar, <strong>TODAS</strong> as parcelas dessa compra
-                  serão removidas.
-                </p>
-              )}
 
             <div
               style={{
