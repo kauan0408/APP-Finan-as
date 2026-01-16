@@ -345,6 +345,7 @@ export default function App() {
       nome: dados.nome,
       limite: Number(dados.limite || 0),
       diaFechamento: Number(dados.diaFechamento || 1),
+      diaVencimento: Number(dados.diaVencimento || 1), // ✅ ÚNICA MUDANÇA NECESSÁRIA
     };
     setCartoes((prev) => [...prev, novo]);
   };
@@ -441,8 +442,8 @@ export default function App() {
             <div className="card profile-card">
               <h2 className="page-title">Entrar</h2>
               <p className="muted small">
-                Faça login com sua conta Google para usar o app e salvar
-                seus dados com segurança.
+                Faça login com sua conta Google para usar o app e salvar seus
+                dados com segurança.
               </p>
 
               <button
@@ -450,7 +451,9 @@ export default function App() {
                 style={{ marginTop: 12 }}
                 onClick={() => {
                   if (!navigator.onLine) {
-                    alert("Sem internet. Conecte-se para fazer login com Google.");
+                    alert(
+                      "Sem internet. Conecte-se para fazer login com Google."
+                    );
                     return;
                   }
                   loginComGoogle();
@@ -517,9 +520,7 @@ export default function App() {
             <button
               className={
                 "bottom-nav-item " +
-                (abaAtiva === "transacoes"
-                  ? "bottom-nav-item-active"
-                  : "")
+                (abaAtiva === "transacoes" ? "bottom-nav-item-active" : "")
               }
               onClick={() => setAbaAtiva("transacoes")}
             >
@@ -537,9 +538,7 @@ export default function App() {
             <button
               className={
                 "bottom-nav-item " +
-                (abaAtiva === "historico"
-                  ? "bottom-nav-item-active"
-                  : "")
+                (abaAtiva === "historico" ? "bottom-nav-item-active" : "")
               }
               onClick={() => setAbaAtiva("historico")}
             >
