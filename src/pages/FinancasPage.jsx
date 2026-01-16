@@ -1,3 +1,4 @@
+// src/pages/FinancasPage.jsx
 import React, { useMemo } from "react";
 import { useFinance } from "../App.jsx";
 
@@ -14,7 +15,6 @@ function calcularProximoPagamento(diaPagamento, refMes, refAno) {
   const dia = Number(diaPagamento);
   if (!dia || dia < 1 || dia > 31) return null;
 
-  const refDate = new Date(refAno, refMes, 1);
   let proximo = new Date(refAno, refMes, dia);
 
   const hoje = new Date();
@@ -32,8 +32,8 @@ function calcularProximoPagamento(diaPagamento, refMes, refAno) {
   return { data: proximo, diasRestantes: diffDias };
 }
 
-// NOVO: pega o valor do gasto fixo no mês selecionado.
-// Se não tiver valor naquele mês, herda o valor mais recente anterior.
+// pega o valor do gasto fixo no mês selecionado.
+// se não tiver valor naquele mês, herda o valor mais recente anterior.
 function getValorFixo(valoresPorMes = {}, chaveMes) {
   if (valoresPorMes && valoresPorMes[chaveMes] != null) {
     return Number(valoresPorMes[chaveMes]);
@@ -60,12 +60,11 @@ export default function FinancasPage() {
     const { mes, ano } = mesReferencia;
 
     let receitas = 0;
-    let despesas = 0;
+    let despesasTransacoes = 0;
     let gastosCartao = 0;
 
     let categorias = {
       essencial: 0,
-      besteira: 0,
       lazer: 0,
     };
 
@@ -74,17 +73,26 @@ export default function FinancasPage() {
     // chave do mês selecionado: "2026-01", etc.
     const chaveMes = `${ano}-${String(mes + 1).padStart(2, "0")}`;
 
-    // NOVO: gastos fixos vindo do perfil (não transações)
-    const gastosFixosPerfil = (Array.isArray(profile.gastosFixos) ? profile.gastosFixos : [])
+    // gastos fixos vindo do perfil (não transações)
+    const gastosFixosPerfil = (Array.isArray(profile?.gastosFixos)
+      ? profile.gastosFixos
+      : []
+    )
       .filter((g) => g.ativo !== false)
-      .filter((g) => (g.nome || "").toLowerCase() !== "educacao" && (g.categoria || "").toLowerCase() !== "educacao")
+      .filter(
+        (g) =>
+          (g.nome || "").toLowerCase() !== "educacao" &&
+          (g.categoria || "").toLowerCase() !== "educacao"
+      )
       .map((g) => ({
         id: g.id,
         descricao: g.nome,
+        categoria: (g.categoria || "").toLowerCase(),
         valor: getValorFixo(g.valoresPorMes || {}, chaveMes),
       }))
       .filter((g) => Number(g.valor) > 0);
 
+    // transações do mês
     transacoes.forEach((t) => {
       const dt = new Date(t.dataHora);
       if (dt.getMonth() === mes && dt.getFullYear() === ano) {
@@ -93,7 +101,7 @@ export default function FinancasPage() {
         if (t.tipo === "receita") {
           receitas += valor;
         } else if (t.tipo === "despesa") {
-          despesas += valor;
+          despesasTransacoes += valor;
 
           if (t.formaPagamento === "credito") {
             gastosCartao += valor;
@@ -101,17 +109,32 @@ export default function FinancasPage() {
 
           const cat = (t.categoria || "").toLowerCase();
           if (cat === "essencial") categorias.essencial += valor;
-          if (cat === "besteira") categorias.besteira += valor;
           if (cat === "lazer") categorias.lazer += valor;
 
           const dia = dt.getDate();
           const semanaIndex = Math.min(3, Math.floor((dia - 1) / 7));
           semanas[semanaIndex] += valor;
-
-          // REMOVIDO: não usar t.fixo porque fixos agora vêm do perfil
-          // if (t.fixo) gastosFixos.push(t);
         }
       }
+    });
+
+    // soma de gastos fixos do mês
+    const totalGastosFixos = gastosFixosPerfil.reduce(
+      (acc, g) => acc + Number(g.valor || 0),
+      0
+    );
+
+    // DESPESA FINAL DO MÊS (transações + fixos)
+    const despesas = despesasTransacoes + totalGastosFixos;
+
+    // fixos entram na pizza por categoria
+    gastosFixosPerfil.forEach((g) => {
+      const v = Number(g.valor || 0);
+      if (!v) return;
+
+      const cat = (g.categoria || "").toLowerCase();
+      if (cat === "essencial") categorias.essencial += v;
+      if (cat === "lazer") categorias.lazer += v;
     });
 
     const saldo = receitas - despesas;
@@ -128,8 +151,7 @@ export default function FinancasPage() {
       .sort((a, b) => Number(b.valor) - Number(a.valor))
       .slice(0, 5);
 
-    const totalCat =
-      categorias.essencial + categorias.besteira + categorias.lazer || 1;
+    const totalCat = categorias.essencial + categorias.lazer || 1;
 
     return {
       receitas,
@@ -138,44 +160,50 @@ export default function FinancasPage() {
       gastosCartao,
       categorias,
       pEssencial: (categorias.essencial / totalCat) * 100,
-      pBesteira: (categorias.besteira / totalCat) * 100,
       pLazer: (categorias.lazer / totalCat) * 100,
       semanas,
       maxSemana: Math.max(...semanas, 1),
       topDespesas,
-      gastosFixos: gastosFixosPerfil, // NOVO: do perfil
+      gastosFixos: gastosFixosPerfil,
+      totalGastosFixos, // DEBUG: pra você ver na tela se somou
+      despesasTransacoes, // DEBUG
     };
-  }, [transacoes, mesReferencia, profile.gastosFixos]); // inclui gastosFixos do profile
+  }, [transacoes, mesReferencia, profile?.gastosFixos]);
 
   /* VARIÁVEIS DO PERFIL */
-  // chave do mês atual: "2025-11", "2025-12", etc.
   const chaveMes = `${mesReferencia.ano}-${String(mesReferencia.mes + 1).padStart(
     2,
     "0"
   )}`;
-  const salariosPorMes = profile.salariosPorMes || {};
+  const salariosPorMes = profile?.salariosPorMes || {};
 
-  const salarioFixo = Number(salariosPorMes[chaveMes] ?? profile.rendaMensal ?? 0);
+  const salarioFixo = Number(
+    salariosPorMes[chaveMes] ?? profile?.rendaMensal ?? 0
+  );
 
-  const limiteGastoMensal = Number(profile.limiteGastoMensal || 0);
-  const diaPagamento = profile.diaPagamento || "";
+  const limiteGastoMensal = Number(profile?.limiteGastoMensal || 0);
+  const diaPagamento = profile?.diaPagamento || "";
 
   const proximoPag = diaPagamento
-    ? calcularProximoPagamento(diaPagamento, mesReferencia.mes, mesReferencia.ano)
+    ? calcularProximoPagamento(
+        diaPagamento,
+        mesReferencia.mes,
+        mesReferencia.ano
+      )
     : null;
 
-  // quanto sobrou/faltou só considerando salário - despesas
-  const resultadoSalario = salarioFixo > 0 ? salarioFixo - resumo.despesas : null;
+  const resultadoSalario =
+    salarioFixo > 0 ? salarioFixo - resumo.despesas : null;
 
-  // saldo exibido começa do salário
   const saldoComSalario =
-    salarioFixo > 0 ? salarioFixo + resumo.receitas - resumo.despesas : resumo.saldo;
+    salarioFixo > 0
+      ? salarioFixo + resumo.receitas - resumo.despesas
+      : resumo.saldo;
 
   const pizzaStyle = {
     backgroundImage: `conic-gradient(
       #8FA3FF 0 ${resumo.pEssencial}%,
-      #6D83F2 ${resumo.pEssencial}% ${resumo.pEssencial + resumo.pBesteira}%,
-      #4C5ACF ${resumo.pEssencial + resumo.pBesteira}% 100%
+      #4C5ACF ${resumo.pEssencial}% 100%
     )`,
   };
 
@@ -202,6 +230,12 @@ export default function FinancasPage() {
   return (
     <div className="page">
       <h2 className="page-title">Visão geral do mês</h2>
+
+      {/* MARCADOR PRA CONFIRMAR QUE ESTE ARQUIVO ESTÁ RODANDO */}
+      <p style={{ color: "yellow", fontSize: 12, marginTop: -6 }}>
+        DEBUG FINANCAS V3 — Fixos: {formatCurrency(resumo.totalGastosFixos)} —
+        Transações: {formatCurrency(resumo.despesasTransacoes)}
+      </p>
 
       {/* NAVEGAÇÃO DO MÊS */}
       <div className="card" style={{ textAlign: "center", marginBottom: 12 }}>
@@ -256,7 +290,6 @@ export default function FinancasPage() {
           </div>
         </div>
 
-        {/* Resultado salário */}
         <div className="resumo-footer">
           {resultadoSalario === null ? (
             <p className="muted small">
@@ -281,19 +314,24 @@ export default function FinancasPage() {
         <div className="resumo-grid">
           <div>
             <p className="resumo-label">Receitas do mês</p>
-            <p className="resumo-number positive">{formatCurrency(resumo.receitas)}</p>
+            <p className="resumo-number positive">
+              {formatCurrency(resumo.receitas)}
+            </p>
           </div>
 
           <div>
             <p className="resumo-label">Despesas do mês</p>
-            <p className="resumo-number negative">{formatCurrency(resumo.despesas)}</p>
+            <p className="resumo-number negative">
+              {formatCurrency(resumo.despesas)}
+            </p>
           </div>
 
           <div>
             <p className="resumo-label">Saldo</p>
             <p
               className={
-                "resumo-number " + (saldoComSalario >= 0 ? "positive" : "negative")
+                "resumo-number " +
+                (saldoComSalario >= 0 ? "positive" : "negative")
               }
             >
               {formatCurrency(saldoComSalario)}
@@ -314,7 +352,9 @@ export default function FinancasPage() {
         <h3>Limite de gasto mensal</h3>
         {limiteGastoMensal ? (
           <>
-            <p className="muted small">Limite: {formatCurrency(limiteGastoMensal)}</p>
+            <p className="muted small">
+              Limite: {formatCurrency(limiteGastoMensal)}
+            </p>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${percLimite}%` }} />
             </div>
@@ -370,10 +410,6 @@ export default function FinancasPage() {
             <div className="legend-item">
               <span className="legend-color legend-essential" />
               Essencial ({resumo.pEssencial.toFixed(0)}%)
-            </div>
-            <div className="legend-item">
-              <span className="legend-color legend-fun" />
-              Besteira ({resumo.pBesteira.toFixed(0)}%)
             </div>
             <div className="legend-item">
               <span className="legend-color legend-leisure" />
