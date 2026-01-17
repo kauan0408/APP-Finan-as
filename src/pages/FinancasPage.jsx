@@ -147,7 +147,8 @@ export default function FinancasPage() {
 
     const saldo = receitas - despesas;
 
-    // ✅ TOP 5 gastos UNIFICADOS por nome (no mês selecionado)
+    // ✅ TOP 5 gastos UNIFICADOS por NOME (no mês selecionado)
+    // ✅ não conta valor 0
     const mapa = new Map();
 
     transacoes.forEach((t) => {
@@ -157,13 +158,18 @@ export default function FinancasPage() {
         dt.getMonth() === mes &&
         dt.getFullYear() === ano
       ) {
+        const v = Number(t.valor || 0);
+        if (!v) return; // ✅ não soma e não conta quando for 0
+
         const key = normalizarNome(t.descricao || "Sem descrição");
+
         const atual = mapa.get(key) || {
           descricao: t.descricao || "Sem descrição",
           valor: 0,
           count: 0,
         };
-        atual.valor += Number(t.valor || 0);
+
+        atual.valor += v;
         atual.count += 1;
 
         // mantém uma descrição “bonita”
@@ -345,24 +351,34 @@ export default function FinancasPage() {
         <div className="resumo-grid">
           <div>
             <p className="resumo-label">Receitas do mês</p>
-            <p className="resumo-number positive">{formatCurrency(resumo.receitas)}</p>
+            <p className="resumo-number positive">
+              {formatCurrency(resumo.receitas)}
+            </p>
           </div>
 
           <div>
             <p className="resumo-label">Despesas do mês</p>
-            <p className="resumo-number negative">{formatCurrency(resumo.despesas)}</p>
+            <p className="resumo-number negative">
+              {formatCurrency(resumo.despesas)}
+            </p>
           </div>
 
           <div>
             <p className="resumo-label">Saldo</p>
-            <p className={"resumo-number " + (saldoComSalario >= 0 ? "positive" : "negative")}>
+            <p
+              className={
+                "resumo-number " + (saldoComSalario >= 0 ? "positive" : "negative")
+              }
+            >
               {formatCurrency(saldoComSalario)}
             </p>
           </div>
 
           <div>
             <p className="resumo-label">Crédito usado</p>
-            <p className="resumo-number negative">{formatCurrency(resumo.gastosCartao)}</p>
+            <p className="resumo-number negative">
+              {formatCurrency(resumo.gastosCartao)}
+            </p>
           </div>
         </div>
       </div>
@@ -411,7 +427,9 @@ export default function FinancasPage() {
               <li key={t.id} className="list-item">
                 <span>
                   {t.descricao}
-                  {t.count > 1 ? <span className="muted small"> · {t.count}x</span> : null}
+                  {t.count > 1 ? (
+                    <span className="muted small"> · {t.count}x</span>
+                  ) : null}
                 </span>
                 <span>{formatCurrency(t.valor)}</span>
               </li>
