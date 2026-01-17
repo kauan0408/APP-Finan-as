@@ -73,6 +73,9 @@ export default function HistoricoPage() {
   // 🗑️ modal de exclusão
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null);
 
+  // ✅ expandir itens quando agrupado na busca
+  const [abertos, setAbertos] = useState({}); // { [groupKey]: true }
+
   const cartaoNomePorId = useMemo(() => {
     const map = {};
     cartoes.forEach((c) => (map[c.id] = c.nome));
@@ -98,12 +101,6 @@ export default function HistoricoPage() {
     if (cartaoFilter !== "todos") {
       listaBase = listaBase.filter((t) => t.cartaoId === cartaoFilter);
     }
-    if (textoFilter.trim()) {
-      const txt = textoFilter.toLowerCase();
-      listaBase = listaBase.filter((t) =>
-        (t.descricao || "").toLowerCase().includes(txt)
-      );
-    }
 
     // ✅ filtros por data usando parseDateValue (ISO e timestamp)
     if (dataInicio) {
@@ -113,6 +110,15 @@ export default function HistoricoPage() {
     if (dataFim) {
       const df = new Date(dataFim + "T23:59:59");
       listaBase = listaBase.filter((t) => parseDateValue(t.dataHora) <= df);
+    }
+
+    // ✅ busca por texto
+    const temBusca = !!textoFilter.trim();
+    if (temBusca) {
+      const txt = textoFilter.toLowerCase();
+      listaBase = listaBase.filter((t) =>
+        (t.descricao || "").toLowerCase().includes(txt)
+      );
     }
 
     // 2) LISTA PARA O RESUMO (lá de cima)
@@ -137,9 +143,42 @@ export default function HistoricoPage() {
       if (t.tipo === "receita") totalReceitasResumo += valor;
     });
 
-    // 3) AGRUPAMENTO POR DIA
-    const porDia = {};
+    // ✅ MODO BUSCA: AGRUPAR (mas com lista detalhada ao clicar)
+    let gruposBusca = [];
+    if (temBusca) {
+      const map = new Map();
 
+      listaBase.forEach((t) => {
+        const key = `${t.tipo}::${normalizarDescricao(t.descricao || "Sem descrição")}`;
+        const atual = map.get(key) || {
+          key,
+          tipo: t.tipo,
+          descricao: t.descricao || "Sem descrição",
+          total: 0,
+          count: 0,
+          ids: [],
+        };
+        const v = Number(t.valor || 0);
+        atual.total += v;
+        atual.count += 1;
+        atual.ids.push(t.id);
+
+        // tenta manter a descrição mais "bonita"
+        if (
+          (!atual.descricao || atual.descricao === "Sem descrição") &&
+          t.descricao
+        ) {
+          atual.descricao = t.descricao;
+        }
+
+        map.set(key, atual);
+      });
+
+      gruposBusca = Array.from(map.values()).sort((a, b) => b.total - a.total);
+    }
+
+    // ✅ MODO NORMAL (SEM BUSCA): AGRUPAMENTO POR DIA, MAS SEM JUNTAR
+    const porDia = {};
     listaBase.forEach((t) => {
       const diaStr = formatDate(t.dataHora);
       if (!porDia[diaStr]) porDia[diaStr] = { itens: [], totalDia: 0 };
@@ -150,33 +189,9 @@ export default function HistoricoPage() {
       porDia[diaStr].totalDia += t.tipo === "despesa" ? -valor : valor;
     });
 
-    // ✅ unifica nomes iguais NO MESMO DIA (mantém tipo separado)
+    // ordena itens do dia por hora desc (mais recente primeiro)
     Object.keys(porDia).forEach((diaStr) => {
-      const itens = porDia[diaStr].itens;
-
-      const map = new Map();
-
-      itens.forEach((t) => {
-        const key = `${t.tipo}::${normalizarDescricao(t.descricao || "Sem descrição")}`;
-
-        const atual = map.get(key);
-        if (!atual) {
-          map.set(key, {
-            ...t,
-            _agregado: true,
-            _count: 1,
-            _ids: [t.id],
-            valor: Number(t.valor || 0),
-          });
-        } else {
-          atual.valor += Number(t.valor || 0);
-          atual._count += 1;
-          atual._ids.push(t.id);
-          // mantém dataHora do primeiro item (não mexe)
-        }
-      });
-
-      porDia[diaStr].itens = Array.from(map.values()).sort(
+      porDia[diaStr].itens.sort(
         (a, b) => parseDateValue(b.dataHora) - parseDateValue(a.dataHora)
       );
     });
@@ -188,6 +203,8 @@ export default function HistoricoPage() {
     });
 
     return {
+      temBusca,
+      gruposBusca,
       porDia,
       diasOrdenados,
       totalDespesasResumo,
@@ -208,6 +225,8 @@ export default function HistoricoPage() {
   ]);
 
   const {
+    temBusca,
+    gruposBusca,
     porDia,
     diasOrdenados,
     totalDespesasResumo,
@@ -231,16 +250,10 @@ export default function HistoricoPage() {
     "Outubro",
     "Novembro",
     "Dezembro",
-  ][mesReferencia.mes];
+  ][mesReferencia?.mes ?? new Date().getMonth()];
 
   // 🔧 abrir modal de edição
   const abrirEdicao = (t) => {
-    // se for agregado, edita o primeiro item real
-    if (t._agregado && Array.isArray(t._ids) && t._ids.length > 0) {
-      const primeiro = transacoes.find((x) => x.id === t._ids[0]);
-      if (primeiro) t = primeiro;
-    }
-
     setEditando(t);
     setDescricaoEdit(t.descricao || "");
 
@@ -282,9 +295,7 @@ export default function HistoricoPage() {
     if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
       const parcelas = transacoes
         .filter((p) => p.groupId === t.groupId)
-        .sort(
-          (a, b) => parseDateValue(a.dataHora) - parseDateValue(b.dataHora)
-        );
+        .sort((a, b) => parseDateValue(a.dataHora) - parseDateValue(b.dataHora));
 
       const totalParcelas = parcelas.length || t.parcelaTotal;
       const valorParcela = v / totalParcelas;
@@ -324,15 +335,7 @@ export default function HistoricoPage() {
   const confirmarApagar = () => {
     if (!confirmandoExclusao) return;
 
-    let t = confirmandoExclusao;
-
-    // se for agregado, apaga todos os ids agregados
-    if (t._agregado && Array.isArray(t._ids) && t._ids.length > 0) {
-      t._ids.forEach((id) => removerTransacao(id));
-      if (editando && t._ids.includes(editando.id)) fecharEdicao();
-      setConfirmandoExclusao(null);
-      return;
-    }
+    const t = confirmandoExclusao;
 
     // Se for parcela com groupId → apaga TODAS as parcelas
     if (t.groupId && t.parcelaTotal && t.parcelaTotal > 1) {
@@ -343,19 +346,17 @@ export default function HistoricoPage() {
       removerTransacao(t.id);
     }
 
-    if (
-      editando &&
-      (editando.id === t.id ||
-        (t.groupId && editando.groupId === t.groupId))
-    ) {
+    if (editando && (editando.id === t.id || (t.groupId && editando.groupId === t.groupId))) {
       fecharEdicao();
     }
 
     setConfirmandoExclusao(null);
   };
 
-  const cancelarApagar = () => {
-    setConfirmandoExclusao(null);
+  const cancelarApagar = () => setConfirmandoExclusao(null);
+
+  const toggleAbrir = (key) => {
+    setAbertos((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
@@ -365,7 +366,7 @@ export default function HistoricoPage() {
       {/* Resumo */}
       <div className="card history-summary">
         <h3>
-          Resumo de {nomeMes} / {mesReferencia.ano}
+          Resumo de {nomeMes} / {mesReferencia?.ano ?? new Date().getFullYear()}
         </h3>
         {totalTransacoesResumo === 0 ? (
           <p className="muted small">
@@ -501,7 +502,7 @@ export default function HistoricoPage() {
                 type="text"
                 value={textoFilter}
                 onChange={(e) => setTextoFilter(e.target.value)}
-                placeholder="Descrição, forma, cartão..."
+                placeholder="Ex.: uber, aluguel..."
               />
               <button
                 type="button"
@@ -512,14 +513,99 @@ export default function HistoricoPage() {
                 🔎
               </button>
             </div>
+            <p className="muted small" style={{ marginTop: 6 }}>
+              {textoFilter.trim()
+                ? "Busca ativa: resultados ficam AGRUPADOS (clique para ver itens)."
+                : "Sem busca: histórico mostra tudo INDIVIDUAL por dia."}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Lista por dia */}
+      {/* LISTA */}
       {totalTransacoesLista === 0 ? (
         <p className="muted mt">Nenhuma transação encontrada.</p>
+      ) : temBusca ? (
+        // ✅ MODO BUSCA (AGRUPADO)
+        <div className="card mt">
+          <h3>Resultados agrupados</h3>
+
+          <ul className="list">
+            {gruposBusca.map((g) => {
+              const aberto = !!abertos[g.key];
+              const itens = g.ids
+                .map((id) => transacoes.find((t) => t.id === id))
+                .filter(Boolean)
+                .sort((a, b) => parseDateValue(b.dataHora) - parseDateValue(a.dataHora));
+
+              return (
+                <li key={g.key} className="list-item" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                    <div>
+                      <span className="badge">{g.tipo === "despesa" ? "Despesa" : "Receita"}</span>{" "}
+                      <strong>{g.descricao}</strong>
+                      <span className="muted small"> · {g.count}x</span>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span className={"number small " + (g.tipo === "despesa" ? "negative" : "positive")}>
+                        {formatCurrency(g.total)}
+                      </span>
+                      <button type="button" className="chip" onClick={() => toggleAbrir(g.key)}>
+                        {aberto ? "▲ Fechar" : "▼ Ver itens"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {aberto && (
+                    <div style={{ marginTop: 10, borderTop: "1px solid rgba(31, 41, 55, 0.6)", paddingTop: 10 }}>
+                      <ul className="list">
+                        {itens.map((t) => (
+                          <li key={t.id} className="list-item list-item-history">
+                            <div>
+                              <div>
+                                <span className="muted small">
+                                  {formatDate(t.dataHora)} • {formatTime(t.dataHora)}
+                                </span>
+                              </div>
+                              <div className="muted small">
+                                {(t.formaPagamento || "").toUpperCase()}
+                                {t.cartaoId && ` · ${cartaoNomePorId[t.cartaoId] || "Cartão"}`}
+                                {t.categoria && ` · ${(t.categoria || "").toString()}`}
+                              </div>
+                            </div>
+
+                            <div className="align-right">
+                              <span
+                                className={
+                                  "number small " +
+                                  (t.tipo === "despesa" ? "negative" : "positive")
+                                }
+                              >
+                                {formatCurrency(t.valor)}
+                              </span>
+
+                              <div style={{ marginTop: 4, display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                                <button type="button" className="chip" onClick={() => abrirEdicao(t)}>
+                                  ✏️ Editar
+                                </button>
+                                <button type="button" className="chip" onClick={() => setConfirmandoExclusao(t)}>
+                                  🗑️ Apagar
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : (
+        // ✅ MODO NORMAL (INDIVIDUAL POR DIA)
         diasOrdenados.map((dia) => {
           const bloco = porDia[dia];
           const totalDia = bloco.totalDia;
@@ -546,29 +632,16 @@ export default function HistoricoPage() {
 
               <ul className="list">
                 {bloco.itens.map((t) => (
-                  <li
-                    key={
-                      t._agregado
-                        ? `ag-${t.tipo}-${normalizarDescricao(t.descricao)}`
-                        : t.id
-                    }
-                    className="list-item list-item-history"
-                  >
+                  <li key={t.id} className="list-item list-item-history">
                     <div>
                       <span className="badge">
                         {t.tipo === "despesa" ? "Despesa" : "Receita"}
                       </span>{" "}
-                      <span>
-                        {t.descricao || "Sem descrição"}
-                        {t._agregado && t._count > 1 ? (
-                          <span className="muted small"> · {t._count}x</span>
-                        ) : null}
-                      </span>
+                      <span>{t.descricao || "Sem descrição"}</span>
 
                       <div className="muted small">
                         {(t.formaPagamento || "").toUpperCase()}
-                        {t.cartaoId &&
-                          ` · ${cartaoNomePorId[t.cartaoId] || "Cartão"}`}
+                        {t.cartaoId && ` · ${cartaoNomePorId[t.cartaoId] || "Cartão"}`}
                         {t.categoria && ` · ${(t.categoria || "").toString()}`}
                       </div>
 
@@ -578,8 +651,7 @@ export default function HistoricoPage() {
                           <strong>
                             {formatCurrency(
                               t.totalCompra ||
-                                Number(t.valor || 0) *
-                                  Number(t.parcelaTotal || 1)
+                                Number(t.valor || 0) * Number(t.parcelaTotal || 1)
                             )}
                           </strong>
                         </div>
@@ -599,11 +671,7 @@ export default function HistoricoPage() {
                       <div className="muted small">{formatTime(t.dataHora)}</div>
 
                       <div style={{ marginTop: 4, display: "flex", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="chip"
-                          onClick={() => abrirEdicao(t)}
-                        >
+                        <button type="button" className="chip" onClick={() => abrirEdicao(t)}>
                           ✏️ Editar
                         </button>
                         <button
@@ -727,11 +795,7 @@ export default function HistoricoPage() {
                 marginTop: 8,
               }}
             >
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={salvarEdicao}
-              >
+              <button type="button" className="primary-btn" onClick={salvarEdicao}>
                 💾 Salvar alterações
               </button>
               <button
@@ -756,12 +820,6 @@ export default function HistoricoPage() {
               {confirmandoExclusao.descricao || "Sem descrição"}
               <br />
               <strong>{formatCurrency(confirmandoExclusao.valor)}</strong>
-              {confirmandoExclusao._agregado && confirmandoExclusao._count > 1 ? (
-                <span className="muted small">
-                  {" "}
-                  · apagará {confirmandoExclusao._count} itens
-                </span>
-              ) : null}
             </p>
 
             <div
