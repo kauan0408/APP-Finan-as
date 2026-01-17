@@ -28,7 +28,6 @@ export default function CartoesPage() {
 
   // ✅ marcador pra você bater o olho e saber que é o arquivo certo
   // (se não quiser, pode apagar depois)
-  const VERSAO = "CARTOES V4 ATIVO";
 
   const [mostrarFormNovo, setMostrarFormNovo] = useState(false);
   const [nomeNovo, setNomeNovo] = useState("");
@@ -590,3 +589,4 @@ export default function CartoesPage() {
     </div>
   );
 }
+
